@@ -7,7 +7,7 @@ use kube::Resource;
 use super::Observation;
 use crate::controller::Error;
 use crate::controller::apply;
-use crate::resources::coordinator_service as builder;
+use crate::resources::{coordinator_service as builder, service};
 
 /// Converge the Coordinator headless Service toward the desired state.
 ///
@@ -22,7 +22,7 @@ pub async fn reconcile(
     let desired = builder::desired_service(cluster);
     let name = desired.meta().name.clone().ok_or(Error::MissingName)?;
 
-    match apply::apply(api, desired, uid, |a, b| a.spec == b.spec).await {
+    match apply::apply(api, desired, uid, service::same_headless_service).await {
         Ok(outcome) => Ok(Observation::ServiceConverged { name, outcome }),
         Err(Error::NotOwned(svc)) => Ok(Observation::ServiceBlocked {
             message: Error::NotOwned(svc.clone()).to_string(),
