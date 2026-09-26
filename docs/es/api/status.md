@@ -47,7 +47,7 @@ Es un **ejemplo de estructura**, no una respuesta producida por el Operador actu
 | Campo | Tipo | Significado |
 | --- | --- | --- |
 | `observedGeneration` | entero opcional | Última generación del CR cuyo estado deseado se ha procesado. |
-| `observedConfigHash` | cadena opcional | Hash de la configuración generada y observada. |
+| `observedConfigHash` | cadena opcional | `sha256:<hex>` combinado de los documentos `server.yaml` de coordinator y tablet (coordinator primero); cada ConfigMap lleva además su propio hash en anotación para futuros rollouts. |
 | `observedVersion` | cadena opcional | Versión confirmada mediante observación, no simplemente solicitada. |
 | `clusterHealth` | objeto opcional | Estado `GREEN`, `YELLOW`, `RED` o `UNKNOWN` y contadores globales de réplicas, ISR y líderes. |
 | `coordinatorEndpoints` | lista de cadenas | Endpoints de Coordinator para los clientes. |

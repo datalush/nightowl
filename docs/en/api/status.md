@@ -47,7 +47,7 @@ This is a **shape example**, not output produced by the current Operator. Endpoi
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `observedGeneration` | integer, optional | The last CR generation whose desired state has actually been handled. |
-| `observedConfigHash` | string, optional | Hash of the rendered configuration actually observed. |
+| `observedConfigHash` | string, optional | Combined `sha256:<hex>` over the rendered coordinator and tablet `server.yaml` documents (coordinator first); each ConfigMap also carries its own hash annotation for future rollout triggers. |
 | `observedVersion` | string, optional | Version confirmed by observation, not simply requested. |
 | `clusterHealth` | optional object | `GREEN`, `YELLOW`, `RED`, or `UNKNOWN`, plus global replica/ISR/leader counts. |
 | `coordinatorEndpoints` | list of strings | Endpoints clients can use to discover the Coordinator. |
