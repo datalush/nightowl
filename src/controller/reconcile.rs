@@ -7,6 +7,7 @@ use kube::runtime::controller::Action;
 use super::reconcilers::{self, Observation};
 use super::{Context, Error};
 use crate::api::FlussCluster;
+use crate::controller::guardrails;
 
 /// Coordinate one FlussCluster reconciliation.
 ///
@@ -31,6 +32,10 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     observations
         .push(reconcilers::coordinator_service::reconcile(&services, &cluster, &uid).await?);
     observations.extend(reconcilers::config_map::reconcile(&configmaps, &cluster, &uid).await?);
+    if let Some(topology) = guardrails::replication::check(&cluster) {
+        observations.push(topology);
+    }
+    observations.extend(guardrails::storage::check(&ctx.client, &namespace, &cluster).await?);
 
     if reconcilers::status::reconcile(&clusters, &cluster, &observations).await? {
         tracing::info!(cluster = %name, "updated FlussCluster status");
@@ -40,6 +45,9 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
         return Err(Error::NotOwned(svc.to_string()));
     }
     if let Some((_, message)) = observations.iter().find_map(Observation::blocked_config) {
+        return Err(Error::InvalidConfig(message.to_string()));
+    }
+    if let Some(message) = observations.iter().find_map(Observation::blocked_guardrail) {
         return Err(Error::InvalidConfig(message.to_string()));
     }
     Ok(Action::await_change())

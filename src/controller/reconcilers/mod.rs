@@ -17,6 +17,9 @@ pub enum Observation {
     ServiceBlocked { name: String, message: String },
     ConfigMapConverged { name: String, outcome: ApplyOutcome },
     ConfigMapBlocked { name: String, message: String },
+    StorageReady { evidence: Vec<String> },
+    StorageBlocked { name: String, message: String },
+    TopologyBlocked { message: String },
 }
 
 impl Observation {
@@ -32,6 +35,15 @@ impl Observation {
     pub fn blocked_config(&self) -> Option<(&str, &str)> {
         match self {
             Observation::ConfigMapBlocked { name, message } => Some((name, message)),
+            _ => None,
+        }
+    }
+
+    /// Message of a guardrail block (storage deps, topology), if any.
+    pub fn blocked_guardrail(&self) -> Option<&str> {
+        match self {
+            Observation::StorageBlocked { message, .. }
+            | Observation::TopologyBlocked { message } => Some(message),
             _ => None,
         }
     }

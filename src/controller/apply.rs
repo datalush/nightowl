@@ -8,6 +8,7 @@ use kube::Api;
 use kube::api::PostParams;
 
 use super::Error;
+use super::guardrails::ownership::owned_by;
 
 /// What a single [`apply`] call did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,19 +61,4 @@ where
             Ok(ApplyOutcome::Updated)
         }
     }
-}
-
-/// True when the existing object is controlled by our FlussCluster.
-///
-/// Ownership is identified by uid, not by name: a deleted and recreated
-/// FlussCluster keeps its name but gets a fresh uid, and must not inherit
-/// the previous incarnation's resources silently.
-fn owned_by<K: kube::Resource>(existing: &K, uid: &str) -> bool {
-    existing
-        .meta()
-        .owner_references
-        .as_deref()
-        .unwrap_or_default()
-        .iter()
-        .any(|owner| owner.uid == uid && owner.controller == Some(true))
 }
