@@ -2,6 +2,7 @@
 
 [Overview](index.md)
 [What works today](current-state.md)
+[Installing the operator](install.md)
 
 # API reference
 

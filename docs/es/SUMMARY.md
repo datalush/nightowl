@@ -2,6 +2,7 @@
 
 [Inicio](index.md)
 [Estado actual](current-state.md)
+[Instalación del operador](install.md)
 
 # Referencia de la API
 

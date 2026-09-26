@@ -495,6 +495,18 @@ mod tests {
     use kube::CustomResourceExt;
 
     #[test]
+    fn checked_in_crd_matches_the_generator() {
+        let generated = serde_json::to_value(FlussCluster::crd()).expect("CRD must serialize");
+        let checked_in: serde_json::Value =
+            serde_yaml::from_str(include_str!("../deploy/crd.yaml"))
+                .expect("checked-in CRD must parse");
+        assert_eq!(
+            generated, checked_in,
+            "deploy/crd.yaml is stale: regenerate with `cargo run --bin gen-crd`"
+        );
+    }
+
+    #[test]
     fn crd_exposes_lifecycle_policy_and_status() {
         let crd = serde_json::to_value(FlussCluster::crd()).expect("CRD must serialize");
         let schema = &crd["spec"]["versions"][0]["schema"]["openAPIV3Schema"];
