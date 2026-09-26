@@ -91,13 +91,13 @@ scaleIn:
 
 ## Valores predeterminados, observabilidad y opciones avanzadas
 
-Si se incluye `defaults`, sus **tres campos son obligatorios** y deben ser enteros positivos:
+Si se incluye `defaults`, `buckets` y `logReplicationFactor` son obligatorios y deben ser enteros positivos; `minInSyncReplicas` es opcional:
 
 | Campo | Configuración de Fluss | Alcance |
 | --- | --- | --- |
 | `defaults.buckets` | `default.bucket.number` | Valor predeterminado para tablas nuevas. |
 | `defaults.logReplicationFactor` | `default.replication.factor` | Replicación predeterminada del **log** en tablas nuevas; no cuenta pods TabletServer. |
-| `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Afecta a escrituras que esperan confirmación de todas las réplicas; coordinar con los ajustes de confirmación del cliente. |
+| `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Durabilidad de escritura de log a nivel de servidor con `acks=all` (no es un predeterminado por tabla). Si se omite, el Operador genera el quorum `floor(logReplicationFactor / 2) + 1` (1 cuando RF es 1); un valor explícito no debe superar el factor de replicación. Con factores de replicación pares esto prima durabilidad sobre disponibilidad —documentado, no prohibido. Afecta a escrituras que esperan confirmación de todas las réplicas; coordinar con los ajustes de confirmación del cliente. |
 
 `observability.prometheus` es booleano y toma `false` como valor predeterminado en el tipo Rust serializado. El endpoint y el Service de Prometheus todavía no se reconcilian. `configurationOverrides` puede establecerse globalmente y por componente, con nombres de propiedades Fluss y valores de tipo **cadena**, por ejemplo `kv.snapshot.interval: "10min"`. Los valores específicos del componente prevalecen sobre los globales. No pongas credenciales en ninguno de ellos. El futuro reconciler deberá rechazar claves controladas por el Operador —listeners, identidad de TabletServer, ruta ZooKeeper y credenciales S3—; el esquema aún **no** aplica esa restricción. Los cambios dinámicos y los que exigen reinicio necesitarán flujos distintos.
 

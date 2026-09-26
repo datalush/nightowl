@@ -91,13 +91,13 @@ scaleIn:
 
 ## Defaults, observability, and overrides
 
-If `defaults` is present, **all three fields are required** and must be positive integers:
+If `defaults` is present, `buckets` and `logReplicationFactor` are required and must be positive integers; `minInSyncReplicas` is optional:
 
 | Field | Fluss configuration | Scope |
 | --- | --- | --- |
 | `defaults.buckets` | `default.bucket.number` | Default for new tables. |
 | `defaults.logReplicationFactor` | `default.replication.factor` | Default **log** replication for new tables; not the number of TabletServer pods. |
-| `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Applies to writes that require all acknowledgments; coordinate it with client acknowledgement settings. |
+| `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Server-level log write durability with `acks=all` (not a per-table default). When omitted, the Operator renders the quorum default `floor(logReplicationFactor / 2) + 1` (1 when RF is 1); an explicit value must not exceed the replication factor. Even replication factors trade availability for durability under this default — documented, not forbidden. Applies to writes that require all acknowledgments; coordinate it with client acknowledgement settings. |
 
 `observability.prometheus` is a boolean, defaulting to `false` in the serialized Rust type. The Prometheus endpoint and Service have not yet been reconciled. `configurationOverrides` at the cluster, Coordinator, and TabletServer levels maps Fluss property names to **string** values, for example `kv.snapshot.interval: "10min"`. Component-level values take precedence over cluster-level values. Avoid putting credentials in any of them. A future reconciler must reject overrides of Operator-owned keys such as listener addresses, TabletServer identity, ZooKeeper location, and S3 credential properties; the schema does **not** currently enforce that restriction. Dynamic changes and restart-required changes need different workflows.
 
