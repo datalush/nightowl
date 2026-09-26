@@ -31,6 +31,8 @@ delegation:
 
 `serviceAccountName` es un **ServiceAccount existente en el namespace de FlussCluster**. El administrador de AWS lo asocia a un rol IAM mediante IRSA o EKS Pod Identity; el Operador no crea roles IAM ni asociaciones Pod Identity. Los pods Fluss usan la cadena de credenciales predeterminada del SDK de AWS, sin `s3.access-key` ni `s3.secret-key`.
 
+En concreto, con `workloadIdentity` no se genera **ninguna clave de credenciales**: ni `s3.access-key`, ni `s3.secret-key`, ni bloque `config.providers`. La única clave relacionada con la identidad procede de `delegation` (`s3.assumed.role.arn`, obligatoria en este modo).
+
 El rol IAM del ServiceAccount y `delegation.roleArn` **son cosas distintas**. El primero identifica al servidor Fluss y necesita acceso a S3 y permiso `sts:AssumeRole`. El segundo es el rol que Fluss asume para emitir credenciales temporales a sus clientes. Fluss 1.0 exige un rol asumible cuando el servidor obtiene sus credenciales de la cadena predeterminada de AWS. EKS Pod Identity usa el proveedor de credenciales para contenedores del SDK; hay que probar su integración con Fluss en EKS antes de declararla verificada.
 
 ### Secret de Kubernetes existente

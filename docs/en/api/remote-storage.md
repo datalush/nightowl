@@ -31,6 +31,8 @@ delegation:
 
 `serviceAccountName` is an **existing ServiceAccount in the FlussCluster namespace**. The AWS administrator associates it with an IAM role via IRSA or EKS Pod Identity; this Operator does not create an IAM role or an EKS Pod Identity association. The Fluss pods use the AWS SDK's default credential chain without `s3.access-key` or `s3.secret-key`.
 
+Concretely, with `workloadIdentity` the renderer emits **no credential keys at all** — no `s3.access-key`, no `s3.secret-key`, no `config.providers` block. The only identity-related key comes from `delegation` (`s3.assumed.role.arn`, required in this mode).
+
 The ServiceAccount's IAM role and `delegation.roleArn` are **not the same setting**. The first identifies the Fluss server, which needs S3 access and `sts:AssumeRole` permission. The second is the role Fluss assumes to issue temporary credentials to clients. Fluss 1.0 requires an assumed role when server credentials come from the default AWS chain. EKS Pod Identity uses the SDK container credential provider; integration with Fluss must still be exercised in EKS before claiming a tested deployment.
 
 ### Existing Kubernetes Secret
