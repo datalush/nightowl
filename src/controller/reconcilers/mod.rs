@@ -5,6 +5,7 @@
 //! live explicitly in the coordinator. Adding a resource means a new file
 //! here plus a few lines there — never a longer coordinator.
 
+pub mod config_map;
 pub mod coordinator_service;
 pub mod status;
 
@@ -14,6 +15,8 @@ use super::apply::ApplyOutcome;
 pub enum Observation {
     ServiceConverged { name: String, outcome: ApplyOutcome },
     ServiceBlocked { name: String, message: String },
+    ConfigMapConverged { name: String, outcome: ApplyOutcome },
+    ConfigMapBlocked { name: String, message: String },
 }
 
 impl Observation {
@@ -21,7 +24,15 @@ impl Observation {
     pub fn blocked_service(&self) -> Option<&str> {
         match self {
             Observation::ServiceBlocked { name, .. } => Some(name),
-            Observation::ServiceConverged { .. } => None,
+            _ => None,
+        }
+    }
+
+    /// Name and message of a ConfigMap blocking progress, if any.
+    pub fn blocked_config(&self) -> Option<(&str, &str)> {
+        match self {
+            Observation::ConfigMapBlocked { name, message } => Some((name, message)),
+            _ => None,
         }
     }
 }

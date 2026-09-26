@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use k8s_openapi::api::core::v1::Service;
+use k8s_openapi::api::core::v1::{ConfigMap, Service};
 use kube::Api;
 use kube::runtime::controller::Action;
 
@@ -24,11 +24,13 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     let uid = cluster.metadata.uid.clone().ok_or(Error::MissingUid)?;
 
     let services: Api<Service> = Api::namespaced(ctx.client.clone(), &namespace);
+    let configmaps: Api<ConfigMap> = Api::namespaced(ctx.client.clone(), &namespace);
     let clusters: Api<FlussCluster> = Api::namespaced(ctx.client.clone(), &namespace);
 
     let mut observations = Vec::new();
     observations
         .push(reconcilers::coordinator_service::reconcile(&services, &cluster, &uid).await?);
+    observations.extend(reconcilers::config_map::reconcile(&configmaps, &cluster, &uid).await?);
 
     if reconcilers::status::reconcile(&clusters, &cluster, &observations).await? {
         tracing::info!(cluster = %name, "updated FlussCluster status");
@@ -36,6 +38,9 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
 
     if let Some(svc) = observations.iter().find_map(Observation::blocked_service) {
         return Err(Error::NotOwned(svc.to_string()));
+    }
+    if let Some((_, message)) = observations.iter().find_map(Observation::blocked_config) {
+        return Err(Error::InvalidConfig(message.to_string()));
     }
     Ok(Action::await_change())
 }

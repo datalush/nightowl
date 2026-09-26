@@ -55,22 +55,35 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
     }
 }
 
-/// Reduce the Service observations to one condition.
+/// Reduce the Service and ConfigMap observations to one condition.
 ///
-/// A block wins over convergence: if any Service is blocked, the condition
-/// is False regardless of the others.
+/// A block wins over convergence: if any Service or ConfigMap is blocked,
+/// the condition is False regardless of the others. Service blocks take
+/// precedence in the message only because they were checked first.
 fn service_condition(
     observations: &[Observation],
 ) -> (ConditionStatus, String, String, Vec<String>) {
     if let Some((name, message)) = observations.iter().find_map(|o| match o {
         Observation::ServiceBlocked { name, message } => Some((name.clone(), message.clone())),
-        Observation::ServiceConverged { .. } => None,
+        _ => None,
     }) {
         return (
             ConditionStatus::False,
             "ServiceBlocked".to_string(),
             message,
             vec![format!("service {name} exists with a different owner")],
+        );
+    }
+
+    if let Some((name, message)) = observations.iter().find_map(|o| match o {
+        Observation::ConfigMapBlocked { name, message } => Some((name.clone(), message.clone())),
+        _ => None,
+    }) {
+        return (
+            ConditionStatus::False,
+            "ConfigBlocked".to_string(),
+            message,
+            vec![format!("configmap {name} blocked")],
         );
     }
 
@@ -85,7 +98,7 @@ fn service_condition(
                 };
                 Some((reason.to_string(), detail.to_string(), name.clone()))
             }
-            Observation::ServiceBlocked { .. } => None,
+            _ => None,
         })
         .unwrap_or_else(|| {
             (
@@ -95,11 +108,23 @@ fn service_condition(
             )
         });
 
+    let mut evidence = vec![format!("service {name} {detail}")];
+    for o in observations {
+        if let Observation::ConfigMapConverged { name, outcome } = o {
+            let detail = match outcome {
+                ApplyOutcome::Created => "created",
+                ApplyOutcome::Updated => "updated",
+                ApplyOutcome::Unchanged => "converged",
+            };
+            evidence.push(format!("configmap {name} {detail}"));
+        }
+    }
+
     (
         ConditionStatus::True,
         reason,
         format!("coordinator service {name} {detail}"),
-        vec![format!("service {name} {detail}")],
+        evidence,
     )
 }
 
