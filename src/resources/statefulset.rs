@@ -41,7 +41,7 @@ pub fn desired_coordinator_statefulset(
     cluster: &FlussCluster,
     secret_hash: Option<&str>,
 ) -> Result<StatefulSet, ConfigError> {
-    Build::assemble(cluster, Role::Coordinator, secret_hash).map(|build| build.build())
+    Build::assemble(cluster, Role::Coordinator, secret_hash)?.build()
 }
 
 /// Desired TabletServer StatefulSet. See [`desired_coordinator_statefulset`].
@@ -49,7 +49,7 @@ pub fn desired_tablet_statefulset(
     cluster: &FlussCluster,
     secret_hash: Option<&str>,
 ) -> Result<StatefulSet, ConfigError> {
-    Build::assemble(cluster, Role::Tablet, secret_hash).map(|build| build.build())
+    Build::assemble(cluster, Role::Tablet, secret_hash)?.build()
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -158,8 +158,8 @@ impl<'a> Build<'a> {
         })
     }
 
-    fn build(&self) -> StatefulSet {
-        StatefulSet {
+    fn build(&self) -> Result<StatefulSet, ConfigError> {
+        Ok(StatefulSet {
             metadata: self.object_meta(),
             spec: Some(StatefulSetSpec {
                 replicas: Some(self.replicas()),
@@ -168,12 +168,12 @@ impl<'a> Build<'a> {
                     ..Default::default()
                 },
                 service_name: Some(self.service_name.clone()),
-                template: self.pod_template(),
+                template: self.pod_template()?,
                 volume_claim_templates: self.claims(),
                 ..Default::default()
             }),
             status: None,
-        }
+        })
     }
 
     fn object_meta(&self) -> ObjectMeta {
@@ -301,6 +301,54 @@ mod tests {
             annotations.get(CONFIG_HASH_ANNOTATION).map(String::as_str),
             Some(hash::sha256_hex(&yaml).as_str()),
             "pod template pins the rendered coordinator config"
+        );
+    }
+
+    #[test]
+    fn grace_period_comes_from_rolling_upgrade_or_default() {
+        let cluster = spike_cluster();
+        let sts = desired_tablet_statefulset(&cluster, None).expect("valid CR must render");
+        let grace = sts
+            .spec
+            .as_ref()
+            .expect("statefulset needs a spec")
+            .template
+            .spec
+            .as_ref()
+            .expect("pod template needs a spec")
+            .termination_grace_period_seconds;
+        assert_eq!(
+            grace,
+            Some(30),
+            "absent rollingUpgrade means the K8s default"
+        );
+
+        let mut cluster = spike_cluster();
+        cluster.spec.rolling_upgrade = Some(crate::api::RollingUpgradeSpec {
+            controlled_shutdown_timeout: "2min".to_string(),
+            recovery_timeout: "5min".to_string(),
+            stabilization_window: "1min".to_string(),
+        });
+        let sts = desired_tablet_statefulset(&cluster, None).expect("valid CR must render");
+        let grace = sts
+            .spec
+            .as_ref()
+            .expect("statefulset needs a spec")
+            .template
+            .spec
+            .as_ref()
+            .expect("pod template needs a spec")
+            .termination_grace_period_seconds;
+        assert_eq!(grace, Some(120), "controlled shutdown budget becomes grace");
+
+        cluster.spec.rolling_upgrade = Some(crate::api::RollingUpgradeSpec {
+            controlled_shutdown_timeout: "soon".to_string(),
+            recovery_timeout: "5min".to_string(),
+            stabilization_window: "1min".to_string(),
+        });
+        assert!(
+            desired_tablet_statefulset(&cluster, None).is_err(),
+            "unparsable timeouts fail closed instead of guessing a grace"
         );
     }
 

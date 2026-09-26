@@ -76,7 +76,7 @@ podDisruptionBudget:
 
 ## Intención de ciclo de vida
 
-`rollingUpgrade` recibe tres cadenas de duración obligatorias: `controlledShutdownTimeout` para la salida controlada, `recoveryTimeout` para recuperar el pod y `stabilizationWindow` antes de pasar al siguiente. El esquema Rust aún no valida el formato ni coordina actualizaciones. `scaleIn.onNonEmptyTabletServer` solo admite **`Block`**: no reducir el StatefulSet si el TabletServer que saldría sigue alojando réplicas. Esta API no tiene `Force` ni rebalanceo automático.
+`rollingUpgrade` recibe tres cadenas de duración obligatorias: `controlledShutdownTimeout` para la salida controlada, `recoveryTimeout` para recuperar el pod y `stabilizationWindow` antes de pasar al siguiente. `controlledShutdownTimeout` determina `terminationGracePeriodSeconds` del pod (30s si falta la sección); Fluss gestiona SIGTERM internamente, así que no hace falta hook preStop — el periodo de gracia es lo que deja terminar el apagado controlado. Tiempos imposibles de parsear fallan el render en vez de adivinar. Las ventanas de recuperación y estabilización se aceptan pero aún no se orquestan. `scaleIn.onNonEmptyTabletServer` solo admite **`Block`**: no reducir el StatefulSet si el TabletServer que saldría sigue alojando réplicas. Esta API no tiene `Force` ni rebalanceo automático.
 
 ```yaml
 rollingUpgrade:

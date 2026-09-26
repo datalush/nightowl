@@ -21,7 +21,9 @@ use crate::constants::{
 };
 
 impl<'a> Build<'a> {
-    pub(super) fn pod_template(&self) -> PodTemplateSpec {
+    pub(super) fn pod_template(
+        &self,
+    ) -> Result<PodTemplateSpec, crate::resources::server_config::ConfigError> {
         let overlay = self.pod_overlay();
         let mut template_labels = self.labels.clone();
         let mut template_annotations = BTreeMap::new();
@@ -36,7 +38,7 @@ impl<'a> Build<'a> {
             template_annotations.insert(SECRET_HASH_ANNOTATION.to_string(), secret_hash.clone());
         }
 
-        PodTemplateSpec {
+        Ok(PodTemplateSpec {
             metadata: Some(ObjectMeta {
                 labels: Some(template_labels),
                 annotations: Some(template_annotations),
@@ -67,8 +69,39 @@ impl<'a> Build<'a> {
                     .scheduling()
                     .and_then(|s| (!s.tolerations.is_empty()).then(|| s.tolerations.clone())),
                 topology_spread_constraints: self.spread_constraints(),
+                termination_grace_period_seconds: Some(self.grace_period_seconds()?),
                 ..Default::default()
             }),
+        })
+    }
+
+    /// Seconds the kubelet waits after SIGTERM before SIGKILL.
+    ///
+    /// Fluss handles SIGTERM with an internal controlled shutdown; the
+    /// grace period is what lets it finish. From
+    /// `rollingUpgrade.controlledShutdownTimeout`, else the Kubernetes
+    /// 30s default rendered explicitly (an absent field reads back
+    /// defaulted and would look like drift). Unparsable values fail
+    /// closed: a guess here could SIGKILL mid-shutdown.
+    fn grace_period_seconds(&self) -> Result<i64, crate::resources::server_config::ConfigError> {
+        use crate::resources::server_config::ConfigError;
+        use crate::utils::duration;
+
+        match self
+            .cluster
+            .spec
+            .rolling_upgrade
+            .as_ref()
+            .map(|upgrade| upgrade.controlled_shutdown_timeout.as_str())
+        {
+            None => Ok(30),
+            Some(raw) => duration::to_seconds(raw)
+                .and_then(|seconds| seconds.try_into().ok())
+                .ok_or_else(|| ConfigError::InvalidValue {
+                    key: "rollingUpgrade.controlledShutdownTimeout".to_string(),
+                    value: raw.to_string(),
+                    reason: "must be a Fluss duration like 30s, 5min or 1h".to_string(),
+                }),
         }
     }
 

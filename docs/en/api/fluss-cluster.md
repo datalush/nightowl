@@ -76,7 +76,7 @@ podDisruptionBudget:
 
 ## Lifecycle intent
 
-`rollingUpgrade` accepts three required duration strings: `controlledShutdownTimeout` for graceful exit, `recoveryTimeout` for the replacement pod, and `stabilizationWindow` before advancing. The Rust schema does not yet validate their syntax or orchestrate an upgrade. `scaleIn.onNonEmptyTabletServer` currently accepts **only `Block`**: never decrement a StatefulSet if the outgoing TabletServer still hosts replicas. There is no `Force` variant or automatic rebalance in this API.
+`rollingUpgrade` accepts three required duration strings: `controlledShutdownTimeout` for graceful exit, `recoveryTimeout` for the replacement pod, and `stabilizationWindow` before advancing. `controlledShutdownTimeout` drives the pod `terminationGracePeriodSeconds` (30s when the section is absent); Fluss handles SIGTERM internally, so no preStop hook is needed — the grace period is what lets controlled shutdown finish. Unparsable timeouts fail the render instead of guessing. Recovery and stabilization windows are accepted but not yet orchestrated. `scaleIn.onNonEmptyTabletServer` currently accepts **only `Block`**: never decrement a StatefulSet if the outgoing TabletServer still hosts replicas. There is no `Force` variant or automatic rebalance in this API.
 
 ```yaml
 rollingUpgrade:
