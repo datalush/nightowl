@@ -16,16 +16,24 @@ accepting a list.
 
 Keep a single S3 directory per `FlussCluster`:
 
-- Render it into the **plural** `remote.data.dirs` key as a one-element
-  location (`s3://<bucket>/<prefix>`). Fluss 1.0 recommends `remote.data.dirs`
-  for new clusters even with a single location, so this is the documented
-  posture, not a workaround.
+- Render it into the **singular** `remote.data.dir` key as a one-element
+  location (`s3://<bucket>/<prefix>`).
 - Defer multi-location support. A real multi-location model would require
   per-location backend configuration (region, endpoint, credentials per
   location) — a section redesign, not a comma. Our flat `s3` shape
   (one region, one endpoint, one authentication) cannot express that, and
   turning `prefix` alone into a list would only cover the weakest case
   (several prefixes on the same backend), which nobody has asked for.
+
+## Amendment 2026-09-26: singular key, not plural
+
+The original text above rendered the **plural** `remote.data.dirs`, following
+the Fluss 1.0 docs recommendation for new clusters. Live evidence against
+`apache/fluss:1.0.0` overturned that: the image ignores the plural key and
+both servers fail startup with `Can not create a Path from a null string`,
+while the Helm reference renders the singular `remote.data.dir` and runs.
+Decision corrected to the singular key; the single-location posture is
+unchanged. Revisit the plural only with runtime evidence on a newer image.
 
 ## Consequences
 

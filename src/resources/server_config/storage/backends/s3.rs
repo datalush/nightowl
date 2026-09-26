@@ -1,15 +1,16 @@
 use std::collections::BTreeMap;
 
 use crate::api::{S3AuthenticationSpec, S3DelegationSpec, S3StorageSpec};
+use crate::constants::{S3_ACCESS_KEY_FILE, S3_SECRET_KEY_FILE, S3_SECRETS_DIR};
 
 /// Render the S3-backed `server.yaml` properties.
 ///
-/// Takes the narrowest input (`&S3StorageSpec`, not the whole cluster) so a
-/// future backend dispatcher can call it without refactoring.
-/// Keys rendered here that users must not override: the S3 wiring is
-/// validated as a unit (location, access, credentials, delegation).
+/// The single location renders into the singular `remote.data.dir`: the
+/// plural `remote.data.dirs` is documented for newer Fluss, but the 1.0.0
+/// image ignores it and fails startup on a null remote path (verified live:
+/// `Can not create a Path from a null string`). See ADR-0001 amendment.
 pub(crate) const PROTECTED_KEYS: &[&str] = &[
-    "remote.data.dirs",
+    "remote.data.dir",
     "s3.region",
     "s3.endpoint",
     "s3.path-style-access",
@@ -28,7 +29,7 @@ pub(crate) fn properties(spec: &S3StorageSpec) -> BTreeMap<String, String> {
 
     let mut props = BTreeMap::from([
         (
-            "remote.data.dirs".to_string(),
+            "remote.data.dir".to_string(),
             format!("s3://{bucket}/{prefix}"),
         ),
         ("s3.region".to_string(), region),
@@ -51,11 +52,11 @@ pub(crate) fn properties(spec: &S3StorageSpec) -> BTreeMap<String, String> {
             );
             props.insert(
                 "s3.access-key".to_string(),
-                "${directory:/etc/fluss/secrets/s3:access-key}".to_string(),
+                format!("${{directory:{S3_SECRETS_DIR}:{S3_ACCESS_KEY_FILE}}}"),
             );
             props.insert(
                 "s3.secret-key".to_string(),
-                "${directory:/etc/fluss/secrets/s3:secret-key}".to_string(),
+                format!("${{directory:{S3_SECRETS_DIR}:{S3_SECRET_KEY_FILE}}}"),
             );
         }
         S3AuthenticationSpec::WorkloadIdentity { .. } => {}

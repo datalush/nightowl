@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
+use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{ConfigMap, Service};
 use kube::runtime::controller::Action;
 use kube::runtime::{Controller, watcher};
@@ -32,6 +33,8 @@ pub enum Error {
     MissingUid,
     #[error("service {0} exists with a different owner; refusing to adopt it")]
     NotOwned(String),
+    #[error("{kind} {name} exists with a different owner; refusing to adopt it")]
+    NotOwnedResource { kind: String, name: String },
     #[error("invalid config: {0}")]
     InvalidConfig(String),
     #[error("kubernetes api error: {0}")]
@@ -46,7 +49,7 @@ pub enum Error {
 fn error_policy(cluster: Arc<FlussCluster>, error: &Error, _ctx: Arc<Context>) -> Action {
     let name = cluster.metadata.name.as_deref().unwrap_or("<no-name>");
     match error {
-        Error::NotOwned(_) | Error::InvalidConfig(_) => {
+        Error::NotOwned(_) | Error::NotOwnedResource { .. } | Error::InvalidConfig(_) => {
             tracing::error!(cluster = %name, error = %error, "reconcile blocked");
             Action::await_change()
         }
@@ -65,11 +68,13 @@ pub async fn run(client: Client, namespace: &str) {
     let clusters: Api<FlussCluster> = Api::namespaced(client.clone(), namespace);
     let services: Api<Service> = Api::namespaced(client.clone(), namespace);
     let configmaps: Api<ConfigMap> = Api::namespaced(client.clone(), namespace);
+    let statefulsets: Api<StatefulSet> = Api::namespaced(client.clone(), namespace);
     let context = Arc::new(Context { client });
 
     Controller::new(clusters, watcher::Config::default())
         .owns(services, watcher::Config::default())
         .owns(configmaps, watcher::Config::default())
+        .owns(statefulsets, watcher::Config::default())
         .run(reconcile, error_policy, context)
         .for_each(|result| async move {
             match result {

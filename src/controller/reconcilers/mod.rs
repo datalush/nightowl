@@ -7,7 +7,9 @@
 
 pub mod config_map;
 pub mod coordinator_service;
+pub mod statefulset;
 pub mod status;
+pub mod tablet_service;
 
 use super::apply::ApplyOutcome;
 
@@ -17,6 +19,8 @@ pub enum Observation {
     ServiceBlocked { name: String, message: String },
     ConfigMapConverged { name: String, outcome: ApplyOutcome },
     ConfigMapBlocked { name: String, message: String },
+    StatefulSetConverged { name: String, outcome: ApplyOutcome },
+    StatefulSetBlocked { name: String, message: String },
     ConfigHash { value: String },
     StorageReady { evidence: Vec<String> },
     StorageBlocked { name: String, message: String },
@@ -36,6 +40,14 @@ impl Observation {
     pub fn blocked_config(&self) -> Option<(&str, &str)> {
         match self {
             Observation::ConfigMapBlocked { name, message } => Some((name, message)),
+            _ => None,
+        }
+    }
+
+    /// Name and message of a StatefulSet blocking progress, if any.
+    pub fn blocked_statefulset(&self) -> Option<(&str, &str)> {
+        match self {
+            Observation::StatefulSetBlocked { name, message } => Some((name, message)),
             _ => None,
         }
     }

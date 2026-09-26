@@ -39,6 +39,19 @@ pub const COORDINATOR_CONFIG_SUFFIX: &str = "-coordinator-config";
 /// Suffix appended to the FlussCluster name for the TabletServer ConfigMap.
 pub const TABLET_CONFIG_SUFFIX: &str = "-tabletserver-config";
 
+/// Suffix appended to the FlussCluster name for the Coordinator StatefulSet.
+pub const COORDINATOR_STATEFULSET_SUFFIX: &str = "-coordinator";
+
+/// Suffix appended to the FlussCluster name for the TabletServer StatefulSet.
+pub const TABLET_STATEFULSET_SUFFIX: &str = "-tabletserver";
+
+/// Suffix for the TabletServer headless Service backing StatefulSet DNS.
+///
+/// TODO(vt0p, joint session): no tablet headless Service exists yet — the
+/// StatefulSet references this name, but per-pod DNS only resolves once the
+/// Service (or the 7vp7 client/headless Service) is created.
+pub const TABLET_HEADLESS_SUFFIX: &str = "-tabletserver-headless";
+
 /// Name of the internal Fluss listener port on generated Services.
 pub const PORT_NAME_INTERNAL: &str = "internal";
 
@@ -58,3 +71,14 @@ pub const CONFIG_HASH_ANNOTATION: &str = "fluss.datalush.com/config-hash";
 /// Shared with the future StatefulSet: its data volume must mount exactly
 /// here, so the value lives centrally rather than in `server_config`.
 pub const DEFAULT_DATA_DIR: &str = "/tmp/fluss/data";
+
+/// Directory inside the pod where the S3 Secret is mounted for secret auth.
+///
+/// The rendered `server.yaml` points its `${directory:...}` markers here;
+/// the StatefulSet builder mounts exactly this path, so both sides share
+/// the constant instead of a duplicated literal.
+pub const S3_SECRETS_DIR: &str = "/etc/fluss/secrets/s3";
+
+/// File names inside [`S3_SECRETS_DIR`] holding the static credentials.
+pub const S3_ACCESS_KEY_FILE: &str = "access-key";
+pub const S3_SECRET_KEY_FILE: &str = "secret-key";

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{ConfigMap, Service};
 use kube::Api;
 use kube::runtime::controller::Action;
@@ -26,12 +27,15 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
 
     let services: Api<Service> = Api::namespaced(ctx.client.clone(), &namespace);
     let configmaps: Api<ConfigMap> = Api::namespaced(ctx.client.clone(), &namespace);
+    let statefulsets: Api<StatefulSet> = Api::namespaced(ctx.client.clone(), &namespace);
     let clusters: Api<FlussCluster> = Api::namespaced(ctx.client.clone(), &namespace);
 
     let mut observations = Vec::new();
     observations
         .push(reconcilers::coordinator_service::reconcile(&services, &cluster, &uid).await?);
+    observations.push(reconcilers::tablet_service::reconcile(&services, &cluster, &uid).await?);
     observations.extend(reconcilers::config_map::reconcile(&configmaps, &cluster, &uid).await?);
+    observations.extend(reconcilers::statefulset::reconcile(&statefulsets, &cluster, &uid).await?);
     if let Some(topology) = guardrails::replication::check(&cluster) {
         observations.push(topology);
     }
@@ -46,6 +50,15 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     }
     if let Some((_, message)) = observations.iter().find_map(Observation::blocked_config) {
         return Err(Error::InvalidConfig(message.to_string()));
+    }
+    if let Some((name, _)) = observations
+        .iter()
+        .find_map(Observation::blocked_statefulset)
+    {
+        return Err(Error::NotOwnedResource {
+            kind: "statefulset".to_string(),
+            name: name.to_string(),
+        });
     }
     if let Some(message) = observations.iter().find_map(Observation::blocked_guardrail) {
         return Err(Error::InvalidConfig(message.to_string()));

@@ -14,7 +14,7 @@ Fluss usa discos locales de los TabletServers para los datos recientes y **almac
 | `authentication` | objeto con discriminador | Sí | `workloadIdentity` o `secret`. |
 | `delegation` | objeto con discriminador | No | `assumeRole` o `getSessionToken`; consulta la distinción siguiente. |
 
-El futuro reconciler convertirá `bucket` y `prefix` en `s3://<bucket>/<prefix>` y configurará `s3.region`, `s3.endpoint` y `s3.path-style-access` cuando corresponda. Fluss 1.0 recomienda `remote.data.dirs` para clústeres nuevos, incluso con una sola ubicación. Tras escribir datos, cambiar la ubicación requiere una migración, no simplemente generar otra configuración para los pods.
+El reconciler convierte `bucket` y `prefix` en `s3://<bucket>/<prefix>` dentro de la clave singular `remote.data.dir` y configura `s3.region`, `s3.endpoint` y `s3.path-style-access` cuando corresponde. La clave singular es deliberada: la imagen `apache/fluss:1.0.0` ignora el plural `remote.data.dirs` y aborta el arranque con ruta remota nula (ver ADR-0001). Tras escribir datos, cambiar la ubicación requiere una migración, no simplemente generar otra configuración para los pods.
 
 ## Autenticación del servidor
 

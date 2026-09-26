@@ -45,18 +45,7 @@ pub fn desired_coordinator_config(
         block_owner_deletion: Some(true),
     };
 
-    let mut properties = server_config::zookeeper::properties(cluster);
-    properties.extend(server_config::listeners::properties(cluster));
-    properties.extend(server_config::storage::properties(cluster));
-    properties.extend(server_config::table_defaults::properties(cluster));
-    let mut properties = server_config::overrides::apply(
-        properties,
-        &cluster.spec.configuration_overrides,
-        &cluster.spec.coordinator.configuration_overrides,
-    )?;
-    server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
-
-    let server_yaml = render::to_yaml(&properties);
+    let server_yaml = coordinator_server_yaml(cluster)?;
     let config_hash = hash::sha256_hex(&server_yaml);
     let data = BTreeMap::from([(CONFIG_DATA_KEY.to_string(), server_yaml)]);
 
@@ -112,22 +101,7 @@ pub fn desired_tablet_config(
         block_owner_deletion: Some(true),
     };
 
-    let mut properties = server_config::zookeeper::properties(cluster);
-    properties.extend(server_config::listeners::properties(cluster));
-    properties.extend(server_config::storage::properties(cluster));
-    properties.extend(server_config::table_defaults::properties(cluster));
-    properties.insert(
-        "data.dir".to_string(),
-        server_config::storage::data_dir(cluster),
-    );
-    let mut properties = server_config::overrides::apply(
-        properties,
-        &cluster.spec.configuration_overrides,
-        &cluster.spec.tablet_servers.configuration_overrides,
-    )?;
-    server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
-
-    let server_yaml = render::to_yaml(&properties);
+    let server_yaml = tablet_server_yaml(cluster)?;
     let config_hash = hash::sha256_hex(&server_yaml);
     let data = BTreeMap::from([(CONFIG_DATA_KEY.to_string(), server_yaml)]);
 
@@ -149,4 +123,47 @@ pub fn desired_tablet_config(
         binary_data: None,
         immutable: None,
     })
+}
+
+/// Rendered coordinator `server.yaml`, shared by the ConfigMap and the
+/// StatefulSet pod-template hash.
+///
+/// Single source of truth: both objects must agree on the content, or the
+/// rollout hash would drift from what the pods actually mount.
+pub(crate) fn coordinator_server_yaml(
+    cluster: &FlussCluster,
+) -> Result<String, server_config::ConfigError> {
+    let mut properties = server_config::zookeeper::properties(cluster);
+    properties.extend(server_config::listeners::properties(cluster));
+    properties.extend(server_config::storage::properties(cluster));
+    properties.extend(server_config::table_defaults::properties(cluster));
+    let mut properties = server_config::overrides::apply(
+        properties,
+        &cluster.spec.configuration_overrides,
+        &cluster.spec.coordinator.configuration_overrides,
+    )?;
+    server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
+    Ok(render::to_yaml(&properties))
+}
+
+/// Rendered tablet `server.yaml`, shared by the ConfigMap and the
+/// StatefulSet pod-template hash. See [`coordinator_server_yaml`].
+pub(crate) fn tablet_server_yaml(
+    cluster: &FlussCluster,
+) -> Result<String, server_config::ConfigError> {
+    let mut properties = server_config::zookeeper::properties(cluster);
+    properties.extend(server_config::listeners::properties(cluster));
+    properties.extend(server_config::storage::properties(cluster));
+    properties.extend(server_config::table_defaults::properties(cluster));
+    properties.insert(
+        "data.dir".to_string(),
+        server_config::storage::data_dir(cluster),
+    );
+    let mut properties = server_config::overrides::apply(
+        properties,
+        &cluster.spec.configuration_overrides,
+        &cluster.spec.tablet_servers.configuration_overrides,
+    )?;
+    server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
+    Ok(render::to_yaml(&properties))
 }

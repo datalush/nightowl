@@ -14,7 +14,7 @@ Fluss uses local TabletServer disks for hot data and **shared remote storage** f
 | `authentication` | tagged object | Yes | Either `workloadIdentity` or `secret`. |
 | `delegation` | tagged object | No | `assumeRole` or `getSessionToken`; see the distinction below. |
 
-The future reconciler will render `s3://<bucket>/<prefix>` as a Fluss remote location and pass `s3.region`, `s3.endpoint`, and `s3.path-style-access` where applicable. Fluss 1.0 recommends `remote.data.dirs` for new clusters, even with a single location. The location should be treated as immutable after data has been written; changing it requires a migration, not merely a new pod configuration.
+The reconciler renders `s3://<bucket>/<prefix>` into the singular `remote.data.dir` and passes `s3.region`, `s3.endpoint`, and `s3.path-style-access` where applicable. The singular key is deliberate: the `apache/fluss:1.0.0` image ignores the plural `remote.data.dirs` and fails startup on a null remote path (see ADR-0001). The location should be treated as immutable after data has been written; changing it requires a migration, not merely a new pod configuration.
 
 ## Server authentication
 

@@ -7,7 +7,8 @@ pub mod backends;
 
 /// Render the shared storage-related `server.yaml` properties.
 ///
-/// - `remote.data.dirs`: the `s3://<bucket>/<prefix>` location.
+/// - `remote.data.dir`: the `s3://<bucket>/<prefix>` location (singular:
+///   the 1.0.0 image ignores the plural `remote.data.dirs`).
 /// - `s3.region`, `s3.endpoint`, `s3.path-style-access`: S3 access details.
 /// - Secret markers (`config.providers`, `s3.access-key`, `s3.secret-key`
 ///   as `${directory:...}` references, never values) on the `secret`

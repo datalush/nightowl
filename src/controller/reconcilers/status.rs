@@ -81,11 +81,12 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
     }
 }
 
-/// Reduce the Service and ConfigMap observations to one condition.
+/// Reduce the Service, ConfigMap and StatefulSet observations to one condition.
 ///
-/// A block wins over convergence: if any Service or ConfigMap is blocked,
-/// the condition is False regardless of the others. Service blocks take
-/// precedence in the message only because they were checked first.
+/// A block wins over convergence: if any Service, ConfigMap or StatefulSet
+/// is blocked, the condition is False regardless of the others. Service
+/// blocks take precedence in the message only because they were checked
+/// first.
 fn service_condition(
     observations: &[Observation],
 ) -> (ConditionStatus, String, String, Vec<String>) {
@@ -113,6 +114,18 @@ fn service_condition(
         );
     }
 
+    if let Some((name, message)) = observations.iter().find_map(|o| match o {
+        Observation::StatefulSetBlocked { name, message } => Some((name.clone(), message.clone())),
+        _ => None,
+    }) {
+        return (
+            ConditionStatus::False,
+            "StatefulSetBlocked".to_string(),
+            message,
+            vec![format!("statefulset {name} blocked")],
+        );
+    }
+
     let (reason, detail, name) = observations
         .iter()
         .find_map(|o| match o {
@@ -134,7 +147,17 @@ fn service_condition(
             )
         });
 
-    let mut evidence = vec![format!("service {name} {detail}")];
+    let mut evidence = Vec::new();
+    for o in observations {
+        if let Observation::ServiceConverged { name, outcome } = o {
+            let detail = match outcome {
+                ApplyOutcome::Created => "created",
+                ApplyOutcome::Updated => "updated",
+                ApplyOutcome::Unchanged => "converged",
+            };
+            evidence.push(format!("service {name} {detail}"));
+        }
+    }
     for o in observations {
         if let Observation::ConfigMapConverged { name, outcome } = o {
             let detail = match outcome {
@@ -147,12 +170,20 @@ fn service_condition(
         if let Observation::ConfigHash { value } = o {
             evidence.push(format!("config hash {value}"));
         }
+        if let Observation::StatefulSetConverged { name, outcome } = o {
+            let detail = match outcome {
+                ApplyOutcome::Created => "created",
+                ApplyOutcome::Updated => "updated",
+                ApplyOutcome::Unchanged => "converged",
+            };
+            evidence.push(format!("statefulset {name} {detail}"));
+        }
     }
 
     (
         ConditionStatus::True,
         reason,
-        format!("coordinator service {name} {detail}"),
+        format!("service {name} {detail}"),
         evidence,
     )
 }
