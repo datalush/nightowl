@@ -3,6 +3,7 @@
 //! Each module contributes one concern through `properties()`; `config_map.rs`
 //! assembles them per role (coordinator vs tablet server).
 
+pub mod jvm;
 pub mod listeners;
 pub mod overrides;
 pub mod storage;

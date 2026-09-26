@@ -85,11 +85,10 @@ async fn converge_one(
 
 /// StatefulSets are the same when the fields the controller manages agree.
 ///
-/// Only replicas, selector and pod template participate: server-defaulted
-/// fields such as `updateStrategy`, `revisionHistoryLimit` or
-/// `podManagementPolicy` must never read as drift, or every read-back would
-/// trigger a replace loop. Volume claim templates (7vp7) join this
-/// comparison once the builder renders them.
+/// Only replicas, selector, pod template and claim templates participate:
+/// server-defaulted fields such as `updateStrategy`, `revisionHistoryLimit`
+/// or `podManagementPolicy` must never read as drift, or every read-back
+/// would trigger a replace loop.
 fn same_statefulset(a: &StatefulSet, b: &StatefulSet) -> bool {
     let (Some(a_spec), Some(b_spec)) = (a.spec.as_ref(), b.spec.as_ref()) else {
         return a.spec.is_none() && b.spec.is_none();
@@ -97,4 +96,5 @@ fn same_statefulset(a: &StatefulSet, b: &StatefulSet) -> bool {
     a_spec.replicas == b_spec.replicas
         && a_spec.selector == b_spec.selector
         && a_spec.template == b_spec.template
+        && a_spec.volume_claim_templates == b_spec.volume_claim_templates
 }

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{ConfigMap, Service};
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use kube::Api;
 use kube::runtime::controller::Action;
 
@@ -28,18 +29,31 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     let services: Api<Service> = Api::namespaced(ctx.client.clone(), &namespace);
     let configmaps: Api<ConfigMap> = Api::namespaced(ctx.client.clone(), &namespace);
     let statefulsets: Api<StatefulSet> = Api::namespaced(ctx.client.clone(), &namespace);
+    let pdbs: Api<PodDisruptionBudget> = Api::namespaced(ctx.client.clone(), &namespace);
     let clusters: Api<FlussCluster> = Api::namespaced(ctx.client.clone(), &namespace);
 
     let mut observations = Vec::new();
     observations
         .push(reconcilers::coordinator_service::reconcile(&services, &cluster, &uid).await?);
     observations.push(reconcilers::tablet_service::reconcile(&services, &cluster, &uid).await?);
+    observations.push(reconcilers::client_service::reconcile(&services, &cluster, &uid).await?);
     observations.extend(reconcilers::config_map::reconcile(&configmaps, &cluster, &uid).await?);
-    observations.extend(reconcilers::statefulset::reconcile(&statefulsets, &cluster, &uid).await?);
+    // Guardrails gate the workloads: a blocked topology, oversized heap or
+    // missing storage dependency refuses pods instead of merely reporting
+    // them afterwards. Services and ConfigMaps still converge first — they
+    // are harmless leaves and their state feeds `.status`.
     if let Some(topology) = guardrails::replication::check(&cluster) {
         observations.push(topology);
     }
+    observations.extend(guardrails::resources::check(&cluster));
     observations.extend(guardrails::storage::check(&ctx.client, &namespace, &cluster).await?);
+    let workloads_blocked = observations.iter().any(|o| o.blocked_guardrail().is_some());
+    if !workloads_blocked {
+        observations
+            .extend(reconcilers::statefulset::reconcile(&statefulsets, &cluster, &uid).await?);
+        observations
+            .extend(reconcilers::pod_disruption_budget::reconcile(&pdbs, &cluster, &uid).await?);
+    }
 
     if reconcilers::status::reconcile(&clusters, &cluster, &observations).await? {
         tracing::info!(cluster = %name, "updated FlussCluster status");
@@ -57,6 +71,12 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     {
         return Err(Error::NotOwnedResource {
             kind: "statefulset".to_string(),
+            name: name.to_string(),
+        });
+    }
+    if let Some((name, _)) = observations.iter().find_map(Observation::blocked_pdb) {
+        return Err(Error::NotOwnedResource {
+            kind: "poddisruptionbudget".to_string(),
             name: name.to_string(),
         });
     }

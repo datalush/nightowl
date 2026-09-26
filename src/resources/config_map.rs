@@ -137,6 +137,10 @@ pub(crate) fn coordinator_server_yaml(
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
     properties.extend(server_config::table_defaults::properties(cluster));
+    properties.extend(server_config::jvm::properties(
+        cluster.spec.coordinator.jvm.as_ref(),
+        server_config::jvm::COORDINATOR_JVM_KEY,
+    )?);
     let mut properties = server_config::overrides::apply(
         properties,
         &cluster.spec.configuration_overrides,
@@ -159,6 +163,10 @@ pub(crate) fn tablet_server_yaml(
         "data.dir".to_string(),
         server_config::storage::data_dir(cluster),
     );
+    properties.extend(server_config::jvm::properties(
+        cluster.spec.tablet_servers.jvm.as_ref(),
+        server_config::jvm::TABLET_JVM_KEY,
+    )?);
     let mut properties = server_config::overrides::apply(
         properties,
         &cluster.spec.configuration_overrides,

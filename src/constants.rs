@@ -47,13 +47,36 @@ pub const TABLET_STATEFULSET_SUFFIX: &str = "-tabletserver";
 
 /// Suffix for the TabletServer headless Service backing StatefulSet DNS.
 ///
-/// TODO(vt0p, joint session): no tablet headless Service exists yet — the
-/// StatefulSet references this name, but per-pod DNS only resolves once the
-/// Service (or the 7vp7 client/headless Service) is created.
+/// Rendered minimally by the operator so per-pod DNS resolves; the shared
+/// client Service is separate 7vp7 scope.
 pub const TABLET_HEADLESS_SUFFIX: &str = "-tabletserver-headless";
+
+/// Suffix appended to the FlussCluster name for the TabletServer
+/// PodDisruptionBudget.
+pub const TABLET_PDB_SUFFIX: &str = "-tabletserver-pdb";
+
+/// Suffix appended to the FlussCluster name for the Coordinator
+/// PodDisruptionBudget.
+pub const COORDINATOR_PDB_SUFFIX: &str = "-coordinator-pdb";
+
+/// FIP-41 safe default: TabletServer evictions are blocked unless the CR
+/// explicitly allows disruption. Applies when the CR sets no
+/// `podDisruptionBudget` at all; an explicit `enabled: false` removes the
+/// budget instead.
+pub const DEFAULT_TABLET_MAX_UNAVAILABLE: i32 = 0;
 
 /// Name of the internal Fluss listener port on generated Services.
 pub const PORT_NAME_INTERNAL: &str = "internal";
+
+/// Name of the client Fluss listener port on generated Services and pods.
+pub const PORT_NAME_CLIENT: &str = "client";
+
+/// Suffix appended to the FlussCluster name for the shared client Service.
+///
+/// Single Service for both roles: the CR models one client listener, and
+/// Fluss clients bootstrap from any endpoint (coordinator metadata, tablet
+/// data). In-cluster only; external exposure is rejected by the API.
+pub const CLIENT_SERVICE_SUFFIX: &str = "-client";
 
 /// Key inside the generated ConfigMaps holding the rendered `server.yaml`.
 pub const CONFIG_DATA_KEY: &str = "server.yaml";

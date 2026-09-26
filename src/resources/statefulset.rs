@@ -19,21 +19,25 @@ use std::collections::BTreeMap;
 use k8s_openapi::api::apps::v1::{StatefulSet, StatefulSetSpec};
 use k8s_openapi::api::core::v1::{
     ConfigMapVolumeSource, Container, ContainerPort, EmptyDirVolumeSource, EnvVar, EnvVarSource,
-    ExecAction, KeyToPath, LocalObjectReference, ObjectFieldSelector, PodSpec, PodTemplateSpec,
-    Probe, ResourceRequirements, SecretVolumeSource, TCPSocketAction, Volume, VolumeMount,
+    ExecAction, KeyToPath, LocalObjectReference, ObjectFieldSelector, PersistentVolumeClaim,
+    PersistentVolumeClaimSpec, PodSpec, PodTemplateSpec, Probe, ResourceRequirements,
+    SecretVolumeSource, TCPSocketAction, TopologySpreadConstraint, Volume, VolumeMount,
+    VolumeResourceRequirements,
 };
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta, OwnerReference};
 use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
 use crate::api::PodTemplateSpec as FlussPodTemplate;
-use crate::api::{FlussCluster, ImagePullPolicy, ListenersSpec, S3AuthenticationSpec};
+use crate::api::{
+    FlussCluster, ImagePullPolicy, ListenersSpec, S3AuthenticationSpec, SchedulingSpec, StorageSpec,
+};
 use crate::constants::{
     API_VERSION, CONFIG_DATA_KEY, CONFIG_HASH_ANNOTATION, COORDINATOR_CONFIG_SUFFIX,
     COORDINATOR_HEADLESS_SUFFIX, COORDINATOR_STATEFULSET_SUFFIX, KIND_FLUSS_CLUSTER, LABEL_CLUSTER,
-    LABEL_ROLE, PORT_NAME_INTERNAL, ROLE_COORDINATOR, ROLE_TABLET, S3_ACCESS_KEY_FILE,
-    S3_SECRET_KEY_FILE, S3_SECRETS_DIR, TABLET_CONFIG_SUFFIX, TABLET_HEADLESS_SUFFIX,
-    TABLET_STATEFULSET_SUFFIX,
+    LABEL_ROLE, PORT_NAME_CLIENT, PORT_NAME_INTERNAL, ROLE_COORDINATOR, ROLE_TABLET,
+    S3_ACCESS_KEY_FILE, S3_SECRET_KEY_FILE, S3_SECRETS_DIR, TABLET_CONFIG_SUFFIX,
+    TABLET_HEADLESS_SUFFIX, TABLET_STATEFULSET_SUFFIX,
 };
 use crate::utils::hash;
 
@@ -179,6 +183,7 @@ impl<'a> Build<'a> {
                 },
                 service_name: Some(self.service_name.clone()),
                 template: self.pod_template(),
+                volume_claim_templates: self.claims(),
                 ..Default::default()
             }),
             status: None,
@@ -247,6 +252,14 @@ impl<'a> Build<'a> {
                         .map(|name| LocalObjectReference { name: name.clone() })
                         .collect(),
                 ),
+                node_selector: self
+                    .scheduling()
+                    .and_then(|s| (!s.node_selector.is_empty()).then(|| s.node_selector.clone())),
+                affinity: self.scheduling().and_then(|s| s.affinity.clone()),
+                tolerations: self
+                    .scheduling()
+                    .and_then(|s| (!s.tolerations.is_empty()).then(|| s.tolerations.clone())),
+                topology_spread_constraints: self.spread_constraints(),
                 ..Default::default()
             }),
         }
@@ -272,6 +285,38 @@ impl<'a> Build<'a> {
             Role::Coordinator => self.cluster.spec.coordinator.pod_template.as_ref(),
             Role::Tablet => self.cluster.spec.tablet_servers.pod_template.as_ref(),
         }
+    }
+
+    /// Component scheduling intent, when the CR sets one.
+    fn scheduling(&self) -> Option<&SchedulingSpec> {
+        match self.role {
+            Role::Coordinator => self.cluster.spec.coordinator.scheduling.as_ref(),
+            Role::Tablet => self.cluster.spec.tablet_servers.scheduling.as_ref(),
+        }
+    }
+
+    /// Spread constraints: the CR's own plus one hostname-spread when
+    /// `spreadAcrossNodes` asks for it.
+    ///
+    /// `ScheduleAnyway` (not `DoNotSchedule`): a hard hostname spread can
+    /// strand pods when zones/nodes are fewer than replicas; soft spread
+    /// keeps single-node labs working while spreading real clusters.
+    fn spread_constraints(&self) -> Option<Vec<TopologySpreadConstraint>> {
+        let scheduling = self.scheduling()?;
+        let mut constraints = scheduling.topology_spread_constraints.clone();
+        if scheduling.spread_across_nodes {
+            constraints.push(TopologySpreadConstraint {
+                max_skew: 1,
+                topology_key: "kubernetes.io/hostname".to_string(),
+                when_unsatisfiable: "ScheduleAnyway".to_string(),
+                label_selector: Some(LabelSelector {
+                    match_labels: Some(self.labels.clone()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        }
+        (!constraints.is_empty()).then_some(constraints)
     }
 
     fn owner_reference(&self) -> OwnerReference {
@@ -315,7 +360,7 @@ impl<'a> Build<'a> {
                 ..Default::default()
             },
             ContainerPort {
-                name: Some("client".to_string()),
+                name: Some(PORT_NAME_CLIENT.to_string()),
                 container_port: listeners.client.port,
                 protocol: Some("TCP".to_string()),
                 ..Default::default()
@@ -448,9 +493,11 @@ impl<'a> Build<'a> {
                 ..Default::default()
             });
         }
-        if self.role == Role::Tablet {
-            // Placeholder until 7vp7 renders volumeClaimTemplates; the mount
-            // path already matches the tablet server.yaml data directory.
+        // Without a claim template the data dir would have nowhere to live;
+        // the emptyDir keeps the podshape valid until storage is configured.
+        // Tablets always carry storage (required by the schema); the
+        // coordinator only when its optional storage is set.
+        if self.storage().is_none() && self.role == Role::Tablet {
             volumes.push(Volume {
                 name: DATA_VOLUME.to_string(),
                 empty_dir: Some(EmptyDirVolumeSource::default()),
@@ -458,6 +505,44 @@ impl<'a> Build<'a> {
             });
         }
         volumes
+    }
+
+    /// Component storage when configured: required for tablets, optional
+    /// for the coordinator.
+    fn storage(&self) -> Option<&StorageSpec> {
+        match self.role {
+            Role::Coordinator => self.cluster.spec.coordinator.storage.as_ref(),
+            Role::Tablet => Some(&self.cluster.spec.tablet_servers.storage),
+        }
+    }
+
+    /// Persistent claim templates for the data volume, one per pod ordinal.
+    ///
+    /// The claim template owns the `data` volume name, so no explicit data
+    /// volume is rendered alongside it. Retention and expansion policy
+    /// (re82) stays out: creation only.
+    fn claims(&self) -> Option<Vec<PersistentVolumeClaim>> {
+        let storage = self.storage()?;
+        Some(vec![PersistentVolumeClaim {
+            metadata: ObjectMeta {
+                name: Some(DATA_VOLUME.to_string()),
+                ..Default::default()
+            },
+            spec: Some(PersistentVolumeClaimSpec {
+                access_modes: Some(vec!["ReadWriteOnce".to_string()]),
+                resources: Some(VolumeResourceRequirements {
+                    requests: Some(BTreeMap::from([(
+                        "storage".to_string(),
+                        Quantity(storage.size.clone()),
+                    )])),
+                    ..Default::default()
+                }),
+                storage_class_name: storage.storage_class_name.clone(),
+                volume_mode: Some("Filesystem".to_string()),
+                ..Default::default()
+            }),
+            status: None,
+        }])
     }
 
     fn mounts(&self) -> Vec<VolumeMount> {
@@ -562,6 +647,21 @@ mod tests {
             serde_yaml::from_str(include_str!("../../../lab2/demo.yml"))
                 .expect("lab2 demo CR must deserialize");
         cluster.metadata.uid = Some("test-uid".to_string());
+        cluster.spec.coordinator.jvm = Some(crate::api::JvmSpec {
+            heap: "512Mi".to_string(),
+            extra_args: vec![],
+        });
+        cluster.spec.tablet_servers.jvm = Some(crate::api::JvmSpec {
+            heap: "1Gi".to_string(),
+            extra_args: vec!["-Dfoo=bar".to_string()],
+        });
+        cluster.spec.tablet_servers.scheduling = Some(crate::api::SchedulingSpec {
+            spread_across_nodes: true,
+            node_selector: std::collections::BTreeMap::new(),
+            affinity: None,
+            tolerations: vec![],
+            topology_spread_constraints: vec![],
+        });
         cluster
     }
 
@@ -632,6 +732,10 @@ mod tests {
         );
 
         let yaml = config_map::coordinator_server_yaml(&cluster).expect("same render must hold");
+        assert!(
+            yaml.contains("env.java.opts.coordinator-server: -Xms512M -Xmx512M"),
+            "heap normalized from Kubernetes to JVM units, got:\n{yaml}"
+        );
         let annotations = spec
             .template
             .metadata
@@ -678,9 +782,32 @@ mod tests {
             .as_ref()
             .expect("tablet needs volumes")
             .iter()
-            .find(|v| v.name == "data")
-            .expect("tablet needs a data volume");
-        assert!(mount.empty_dir.is_some(), "emptyDir until 7vp7 PVCs");
+            .find(|v| v.name == "data");
+        assert!(
+            mount.is_none(),
+            "claim template owns the data volume, no emptyDir alongside"
+        );
+        let claims = sts
+            .spec
+            .as_ref()
+            .expect("statefulset needs a spec")
+            .volume_claim_templates
+            .as_ref()
+            .expect("tablet storage renders a claim template");
+        assert_eq!(claims.len(), 1);
+        let claim = claims[0].spec.as_ref().expect("claim needs a spec");
+        assert_eq!(
+            claim
+                .resources
+                .as_ref()
+                .expect("claim needs resources")
+                .requests
+                .as_ref()
+                .expect("claim needs requests")["storage"]
+                .0,
+            "5Gi",
+            "size from the CR"
+        );
 
         let credentials = pod_spec(&sts)
             .volumes
@@ -718,6 +845,22 @@ mod tests {
         );
 
         let yaml = config_map::tablet_server_yaml(&cluster).expect("same render must hold");
+        assert!(
+            yaml.contains("env.java.opts.tablet-server: -Xms1G -Xmx1G -Dfoo=bar"),
+            "heap plus extra args land in server.yaml, got:\n{yaml}"
+        );
+
+        let spread = pod_spec(&sts)
+            .topology_spread_constraints
+            .as_ref()
+            .expect("spreadAcrossNodes renders a constraint");
+        assert!(
+            spread
+                .iter()
+                .any(|c| c.topology_key == "kubernetes.io/hostname"
+                    && c.when_unsatisfiable == "ScheduleAnyway"),
+            "soft hostname spread from the CR"
+        );
         let annotations = spec
             .template
             .metadata

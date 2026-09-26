@@ -9,6 +9,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{ConfigMap, Service};
+use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use kube::runtime::controller::Action;
 use kube::runtime::{Controller, watcher};
 use kube::{Api, Client};
@@ -69,12 +70,14 @@ pub async fn run(client: Client, namespace: &str) {
     let services: Api<Service> = Api::namespaced(client.clone(), namespace);
     let configmaps: Api<ConfigMap> = Api::namespaced(client.clone(), namespace);
     let statefulsets: Api<StatefulSet> = Api::namespaced(client.clone(), namespace);
+    let pdbs: Api<PodDisruptionBudget> = Api::namespaced(client.clone(), namespace);
     let context = Arc::new(Context { client });
 
     Controller::new(clusters, watcher::Config::default())
         .owns(services, watcher::Config::default())
         .owns(configmaps, watcher::Config::default())
         .owns(statefulsets, watcher::Config::default())
+        .owns(pdbs, watcher::Config::default())
         .run(reconcile, error_policy, context)
         .for_each(|result| async move {
             match result {

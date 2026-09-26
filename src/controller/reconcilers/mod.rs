@@ -5,8 +5,10 @@
 //! live explicitly in the coordinator. Adding a resource means a new file
 //! here plus a few lines there — never a longer coordinator.
 
+pub mod client_service;
 pub mod config_map;
 pub mod coordinator_service;
+pub mod pod_disruption_budget;
 pub mod statefulset;
 pub mod status;
 pub mod tablet_service;
@@ -21,10 +23,13 @@ pub enum Observation {
     ConfigMapBlocked { name: String, message: String },
     StatefulSetConverged { name: String, outcome: ApplyOutcome },
     StatefulSetBlocked { name: String, message: String },
+    PdbConverged { name: String, outcome: ApplyOutcome },
+    PdbBlocked { name: String, message: String },
     ConfigHash { value: String },
     StorageReady { evidence: Vec<String> },
     StorageBlocked { name: String, message: String },
     TopologyBlocked { message: String },
+    ResourceBlocked { name: String, message: String },
 }
 
 impl Observation {
@@ -52,11 +57,20 @@ impl Observation {
         }
     }
 
-    /// Message of a guardrail block (storage deps, topology), if any.
+    /// Name and message of a PodDisruptionBudget blocking progress, if any.
+    pub fn blocked_pdb(&self) -> Option<(&str, &str)> {
+        match self {
+            Observation::PdbBlocked { name, message } => Some((name, message)),
+            _ => None,
+        }
+    }
+
+    /// Message of a guardrail block (storage deps, topology, resources), if any.
     pub fn blocked_guardrail(&self) -> Option<&str> {
         match self {
             Observation::StorageBlocked { message, .. }
-            | Observation::TopologyBlocked { message } => Some(message),
+            | Observation::TopologyBlocked { message }
+            | Observation::ResourceBlocked { message, .. } => Some(message),
             _ => None,
         }
     }

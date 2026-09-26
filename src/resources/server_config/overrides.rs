@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::{listeners, storage, table_defaults, zookeeper};
+use super::{jvm, listeners, storage, table_defaults, zookeeper};
 
 /// Rejected user override: the key is owned by the Operator.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -21,6 +21,7 @@ fn is_protected(key: &str) -> bool {
         || storage::PROTECTED_KEYS.contains(&key)
         || storage::backends::s3::PROTECTED_KEYS.contains(&key)
         || table_defaults::PROTECTED_KEYS.contains(&key)
+        || jvm::PROTECTED_KEYS.contains(&key)
 }
 
 /// Merge user overrides over the Operator-rendered base properties.

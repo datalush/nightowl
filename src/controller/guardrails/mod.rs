@@ -8,4 +8,5 @@
 
 pub mod ownership;
 pub mod replication;
+pub mod resources;
 pub mod storage;

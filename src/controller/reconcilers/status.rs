@@ -126,6 +126,30 @@ fn service_condition(
         );
     }
 
+    if let Some((name, message)) = observations.iter().find_map(|o| match o {
+        Observation::PdbBlocked { name, message } => Some((name.clone(), message.clone())),
+        _ => None,
+    }) {
+        return (
+            ConditionStatus::False,
+            "PdbBlocked".to_string(),
+            message,
+            vec![format!("poddisruptionbudget {name} blocked")],
+        );
+    }
+
+    if let Some((name, message)) = observations.iter().find_map(|o| match o {
+        Observation::ResourceBlocked { name, message } => Some((name.clone(), message.clone())),
+        _ => None,
+    }) {
+        return (
+            ConditionStatus::False,
+            "ResourceBlocked".to_string(),
+            message,
+            vec![format!("{name} resources blocked")],
+        );
+    }
+
     let (reason, detail, name) = observations
         .iter()
         .find_map(|o| match o {
@@ -134,6 +158,7 @@ fn service_condition(
                     ApplyOutcome::Created => ("ServiceCreated", "created"),
                     ApplyOutcome::Updated => ("ServiceUpdated", "updated"),
                     ApplyOutcome::Unchanged => ("ServiceConverged", "converged"),
+                    ApplyOutcome::Deleted => ("ServiceDeleted", "deleted"),
                 };
                 Some((reason.to_string(), detail.to_string(), name.clone()))
             }
@@ -150,33 +175,24 @@ fn service_condition(
     let mut evidence = Vec::new();
     for o in observations {
         if let Observation::ServiceConverged { name, outcome } = o {
-            let detail = match outcome {
-                ApplyOutcome::Created => "created",
-                ApplyOutcome::Updated => "updated",
-                ApplyOutcome::Unchanged => "converged",
-            };
-            evidence.push(format!("service {name} {detail}"));
+            evidence.push(format!("service {name} {}", outcome_detail(outcome)));
         }
     }
     for o in observations {
         if let Observation::ConfigMapConverged { name, outcome } = o {
-            let detail = match outcome {
-                ApplyOutcome::Created => "created",
-                ApplyOutcome::Updated => "updated",
-                ApplyOutcome::Unchanged => "converged",
-            };
-            evidence.push(format!("configmap {name} {detail}"));
+            evidence.push(format!("configmap {name} {}", outcome_detail(outcome)));
         }
         if let Observation::ConfigHash { value } = o {
             evidence.push(format!("config hash {value}"));
         }
         if let Observation::StatefulSetConverged { name, outcome } = o {
-            let detail = match outcome {
-                ApplyOutcome::Created => "created",
-                ApplyOutcome::Updated => "updated",
-                ApplyOutcome::Unchanged => "converged",
-            };
-            evidence.push(format!("statefulset {name} {detail}"));
+            evidence.push(format!("statefulset {name} {}", outcome_detail(outcome)));
+        }
+        if let Observation::PdbConverged { name, outcome } = o {
+            evidence.push(format!(
+                "poddisruptionbudget {name} {}",
+                outcome_detail(outcome)
+            ));
         }
     }
 
@@ -186,6 +202,16 @@ fn service_condition(
         format!("service {name} {detail}"),
         evidence,
     )
+}
+
+/// One-word evidence detail for a converge outcome.
+fn outcome_detail(outcome: &ApplyOutcome) -> &'static str {
+    match outcome {
+        ApplyOutcome::Created => "created",
+        ApplyOutcome::Updated => "updated",
+        ApplyOutcome::Unchanged => "converged",
+        ApplyOutcome::Deleted => "deleted",
+    }
 }
 
 /// Reduce the storage guardrail observations to one condition.
