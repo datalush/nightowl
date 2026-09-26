@@ -1,0 +1,21 @@
+use std::collections::BTreeMap;
+
+use crate::api::FlussCluster;
+
+/// Render the listener-related `server.yaml` properties.
+///
+/// - `internal.listener.name`: the internal listener name from the CR.
+///   Only the internal name belongs in the shared config; per-pod
+///   `bind.listeners` / `advertised.listeners` are composed at boot.
+pub(crate) fn properties(cluster: &FlussCluster) -> BTreeMap<String, String> {
+    let name = cluster
+        .spec
+        .listeners
+        .as_ref()
+        .expect("listeners is required for the server config")
+        .internal
+        .name
+        .clone();
+
+    BTreeMap::from([("internal.listener.name".to_string(), name)])
+}
