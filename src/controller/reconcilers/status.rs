@@ -4,43 +4,84 @@
 //! and writes it only when it differs. Fluss health stays absent until the
 //! controller can actually observe it; an absent field is honest, an
 //! invented one is not.
+//!
+//! Topic logic lives in one file per concern under [`status`](self):
+//! `resources` (workload convergence), `storage` (reference preflight),
+//! `fluss` (observed health); `common` holds the shared builders. This file
+//! only orchestrates: assemble the pieces, write when changed.
 
-use chrono::SecondsFormat;
+mod common;
+mod fluss;
+mod resources;
+mod storage;
+
 use kube::Api;
 use kube::api::PostParams;
 
 use super::Observation;
-use crate::api::{
-    ConditionStatus, FlussCluster, FlussClusterCondition, FlussClusterStatus, FlussConditionType,
-};
+use crate::api::{FlussCluster, FlussClusterCondition, FlussClusterStatus, FlussConditionType};
 use crate::controller::Error;
-use crate::controller::apply::ApplyOutcome;
 
 /// Render the desired status from observations and write it if it changed.
 ///
 /// Returns true when a write happened. The boolean lets the coordinator log
 /// the write; skipping no-op writes avoids the
 /// write -> watch event -> reconcile -> write loop.
+///
+/// A write conflict (409) retries once against a fresh read: two rapid
+/// reconciles can race on the same base object, and losing that race is
+/// transient, not a reconcile failure.
 pub async fn reconcile(
     api: &Api<FlussCluster>,
     cluster: &FlussCluster,
     observations: &[Observation],
 ) -> Result<bool, Error> {
     let desired = desired_status(cluster, observations);
-    write_if_changed(api, cluster, &desired).await
+    write_if_changed(api, cluster, &desired, observations).await
 }
 
 /// Build the desired status purely from observed state.
 ///
-/// Carries `observedGeneration`/`observedVersion` from the handled object and
-/// reports one `KubernetesResourcesReady` condition derived from the Service
-/// observations. The transition timestamp is preserved when the
-/// (type, status, reason) triple is unchanged, so steady-state reconciles do
-/// not rewrite history.
+/// Carries `observedGeneration`/`observedVersion` from the handled object,
+/// one condition per topic, and the health fields. The transition timestamp
+/// is preserved when the (type, status, reason) triple is unchanged, so
+/// steady-state reconciles do not rewrite history.
 fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> FlussClusterStatus {
-    let (condition_status, reason, message, evidence) = service_condition(observations);
+    let (condition_status, reason, message, evidence) = resources::condition_tuple(observations);
     let (storage_status, storage_reason, storage_message, storage_evidence) =
-        storage_condition(observations);
+        storage::condition_tuple(observations);
+    let (cluster_health, coordinator_endpoints, coordinator, tablet_servers) =
+        fluss::fields(cluster, observations);
+
+    let mut conditions = vec![
+        FlussClusterCondition {
+            condition_type: FlussConditionType::KubernetesResourcesReady,
+            status: condition_status.clone(),
+            reason: reason.clone(),
+            message,
+            evidence,
+            last_transition_time: common::transition_time(
+                cluster,
+                &FlussConditionType::KubernetesResourcesReady,
+                &condition_status,
+                &reason,
+            ),
+        },
+        FlussClusterCondition {
+            condition_type: FlussConditionType::RemoteStorageReady,
+            status: storage_status.clone(),
+            reason: storage_reason.clone(),
+            message: storage_message,
+            evidence: storage_evidence,
+            last_transition_time: common::transition_time(
+                cluster,
+                &FlussConditionType::RemoteStorageReady,
+                &storage_status,
+                &storage_reason,
+            ),
+        },
+    ];
+    conditions.extend(fluss::conditions(cluster, observations));
 
     FlussClusterStatus {
         observed_generation: cluster.metadata.generation,
@@ -49,227 +90,12 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
             Observation::ConfigHash { value } => Some(value.clone()),
             _ => None,
         }),
-        conditions: vec![
-            FlussClusterCondition {
-                condition_type: FlussConditionType::KubernetesResourcesReady,
-                status: condition_status.clone(),
-                reason: reason.clone(),
-                message,
-                evidence,
-                last_transition_time: transition_time(
-                    cluster,
-                    &FlussConditionType::KubernetesResourcesReady,
-                    &condition_status,
-                    &reason,
-                ),
-            },
-            FlussClusterCondition {
-                condition_type: FlussConditionType::RemoteStorageReady,
-                status: storage_status.clone(),
-                reason: storage_reason.clone(),
-                message: storage_message,
-                evidence: storage_evidence,
-                last_transition_time: transition_time(
-                    cluster,
-                    &FlussConditionType::RemoteStorageReady,
-                    &storage_status,
-                    &storage_reason,
-                ),
-            },
-        ],
-        ..Default::default()
+        cluster_health,
+        coordinator_endpoints,
+        coordinator,
+        tablet_servers,
+        conditions,
     }
-}
-
-/// Reduce the Service, ConfigMap and StatefulSet observations to one condition.
-///
-/// A block wins over convergence: if any Service, ConfigMap or StatefulSet
-/// is blocked, the condition is False regardless of the others. Service
-/// blocks take precedence in the message only because they were checked
-/// first.
-fn service_condition(
-    observations: &[Observation],
-) -> (ConditionStatus, String, String, Vec<String>) {
-    if let Some((name, message)) = observations.iter().find_map(|o| match o {
-        Observation::ServiceBlocked { name, message } => Some((name.clone(), message.clone())),
-        _ => None,
-    }) {
-        return (
-            ConditionStatus::False,
-            "ServiceBlocked".to_string(),
-            message,
-            vec![format!("service {name} exists with a different owner")],
-        );
-    }
-
-    if let Some((name, message)) = observations.iter().find_map(|o| match o {
-        Observation::ConfigMapBlocked { name, message } => Some((name.clone(), message.clone())),
-        _ => None,
-    }) {
-        return (
-            ConditionStatus::False,
-            "ConfigBlocked".to_string(),
-            message,
-            vec![format!("configmap {name} blocked")],
-        );
-    }
-
-    if let Some((name, message)) = observations.iter().find_map(|o| match o {
-        Observation::StatefulSetBlocked { name, message } => Some((name.clone(), message.clone())),
-        _ => None,
-    }) {
-        return (
-            ConditionStatus::False,
-            "StatefulSetBlocked".to_string(),
-            message,
-            vec![format!("statefulset {name} blocked")],
-        );
-    }
-
-    if let Some((name, message)) = observations.iter().find_map(|o| match o {
-        Observation::PdbBlocked { name, message } => Some((name.clone(), message.clone())),
-        _ => None,
-    }) {
-        return (
-            ConditionStatus::False,
-            "PdbBlocked".to_string(),
-            message,
-            vec![format!("poddisruptionbudget {name} blocked")],
-        );
-    }
-
-    if let Some((name, message)) = observations.iter().find_map(|o| match o {
-        Observation::ResourceBlocked { name, message } => Some((name.clone(), message.clone())),
-        _ => None,
-    }) {
-        return (
-            ConditionStatus::False,
-            "ResourceBlocked".to_string(),
-            message,
-            vec![format!("{name} resources blocked")],
-        );
-    }
-
-    let (reason, detail, name) = observations
-        .iter()
-        .find_map(|o| match o {
-            Observation::ServiceConverged { name, outcome } => {
-                let (reason, detail) = match outcome {
-                    ApplyOutcome::Created => ("ServiceCreated", "created"),
-                    ApplyOutcome::Updated => ("ServiceUpdated", "updated"),
-                    ApplyOutcome::Unchanged => ("ServiceConverged", "converged"),
-                    ApplyOutcome::Deleted => ("ServiceDeleted", "deleted"),
-                };
-                Some((reason.to_string(), detail.to_string(), name.clone()))
-            }
-            _ => None,
-        })
-        .unwrap_or_else(|| {
-            (
-                "ServiceConverged".to_string(),
-                "converged".to_string(),
-                "unknown".to_string(),
-            )
-        });
-
-    let mut evidence = Vec::new();
-    for o in observations {
-        if let Observation::ServiceConverged { name, outcome } = o {
-            evidence.push(format!("service {name} {}", outcome_detail(outcome)));
-        }
-    }
-    for o in observations {
-        if let Observation::ConfigMapConverged { name, outcome } = o {
-            evidence.push(format!("configmap {name} {}", outcome_detail(outcome)));
-        }
-        if let Observation::ConfigHash { value } = o {
-            evidence.push(format!("config hash {value}"));
-        }
-        if let Observation::StatefulSetConverged { name, outcome } = o {
-            evidence.push(format!("statefulset {name} {}", outcome_detail(outcome)));
-        }
-        if let Observation::PdbConverged { name, outcome } = o {
-            evidence.push(format!(
-                "poddisruptionbudget {name} {}",
-                outcome_detail(outcome)
-            ));
-        }
-    }
-
-    (
-        ConditionStatus::True,
-        reason,
-        format!("service {name} {detail}"),
-        evidence,
-    )
-}
-
-/// One-word evidence detail for a converge outcome.
-fn outcome_detail(outcome: &ApplyOutcome) -> &'static str {
-    match outcome {
-        ApplyOutcome::Created => "created",
-        ApplyOutcome::Updated => "updated",
-        ApplyOutcome::Unchanged => "converged",
-        ApplyOutcome::Deleted => "deleted",
-    }
-}
-
-/// Reduce the storage guardrail observations to one condition.
-///
-/// The preflight always reports exactly one observation, so this condition
-/// always resolves True or False — never unknown.
-fn storage_condition(
-    observations: &[Observation],
-) -> (ConditionStatus, String, String, Vec<String>) {
-    if let Some((name, message)) = observations.iter().find_map(|o| match o {
-        Observation::StorageBlocked { name, message } => Some((name.clone(), message.clone())),
-        _ => None,
-    }) {
-        return (
-            ConditionStatus::False,
-            "StorageBlocked".to_string(),
-            message,
-            vec![format!("remote storage dependency '{name}' unresolved")],
-        );
-    }
-
-    let mut evidence = Vec::new();
-    for o in observations {
-        if let Observation::StorageReady { evidence: e } = o {
-            evidence.extend(e.clone());
-        }
-    }
-    (
-        ConditionStatus::True,
-        "StorageReady".to_string(),
-        "remote storage references resolve".to_string(),
-        evidence,
-    )
-}
-
-/// Keep the previous transition timestamp unless this is a real transition.
-///
-/// A transition is a change of the (type, status, reason) triple; steady
-/// state keeps history stable across reconciles.
-fn transition_time(
-    cluster: &FlussCluster,
-    condition_type: &FlussConditionType,
-    status: &ConditionStatus,
-    reason: &str,
-) -> String {
-    cluster
-        .status
-        .as_ref()
-        .map(|s| s.conditions.as_slice())
-        .unwrap_or(&[])
-        .iter()
-        .find(|c| c.condition_type == *condition_type && c.status == *status && c.reason == reason)
-        .map(|c| c.last_transition_time.clone())
-        .unwrap_or_else(now_rfc3339)
-}
-
-fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 /// Write the status subresource only when it differs from the current one.
@@ -282,6 +108,7 @@ async fn write_if_changed(
     api: &Api<FlussCluster>,
     cluster: &FlussCluster,
     desired: &FlussClusterStatus,
+    observations: &[Observation],
 ) -> Result<bool, Error> {
     if cluster.status.as_ref() == Some(desired) {
         return Ok(false);
@@ -289,8 +116,27 @@ async fn write_if_changed(
     let name = cluster.metadata.name.clone().ok_or(Error::MissingName)?;
     let mut object = cluster.clone();
     object.status = Some(desired.clone());
-    api.replace_status(&name, &PostParams::default(), &object)
+    match api
+        .replace_status(&name, &PostParams::default(), &object)
         .await
-        .map_err(Error::Kube)?;
-    Ok(true)
+    {
+        Ok(_) => Ok(true),
+        // Lost a race with another writer (usually ourselves a reconcile
+        // earlier): recompute against the fresh object once instead of
+        // failing the whole reconcile.
+        Err(kube::Error::Api(status)) if status.code == 409 => {
+            let fresh: FlussCluster = api.get(&name).await.map_err(Error::Kube)?;
+            let desired = desired_status(&fresh, observations);
+            if fresh.status.as_ref() == Some(&desired) {
+                return Ok(false);
+            }
+            let mut object = fresh;
+            object.status = Some(desired);
+            api.replace_status(&name, &PostParams::default(), &object)
+                .await
+                .map_err(Error::Kube)?;
+            Ok(true)
+        }
+        Err(e) => Err(Error::Kube(e)),
+    }
 }

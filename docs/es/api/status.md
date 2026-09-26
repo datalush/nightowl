@@ -1,6 +1,6 @@
 # Estado y condiciones
 
-`status` describe lo observado. **No** lo establece quien crea un `FlussCluster`. La API Rust define la siguiente estructura, pero el watcher actual no actualiza el subrecurso de estado.
+`status` describe lo observado. **No** lo establece quien crea un `FlussCluster`. Los campos quedan ausentes hasta que el controlador puede observarlos de verdad; ausente es honesto, inventado no.
 
 ```yaml
 status:
@@ -42,7 +42,15 @@ status:
       lastTransitionTime: "2026-09-25T12:00:00Z"
 ```
 
-Es un **ejemplo de estructura**, no una respuesta producida por el Operador actual. Los endpoints y contadores son ilustrativos; solo se muestra uno de los tres pods para no alargar el ejemplo. `observedVersion` debe basarse en el clúster real, no copiarse de `spec.version`.
+Es un **ejemplo de estructura**; los endpoints y contadores son ilustrativos. `observedVersion` debe basarse en el clúster real, no copiarse de `spec.version`.
+
+## Salud del lado Fluss
+
+Cuando el coordinator responde por el listener interno, el controlador rellena además `clusterHealth` (contadores globales de réplicas, ISR y líderes desde `getClusterHealth`), `coordinatorEndpoints` (coordinators vistos en membership), `coordinator` (deseadas frente a registradas) y `tabletServers` (deseadas frente a miembros registrados, una entrada por servidor), más las condiciones `FlussReachable` y `ClusterHealthy`. La membresía la observa Fluss — estrictamente más honesto que el Ready de pods para saber "cuántos servidores sirven".
+
+Las sondas corren como mucho cada 60 segundos por clúster (límite en memoria, sin churn en `.status`); entre sondas valen los últimos valores observados. Un clúster inalcanzable reporta `FlussReachable=False` con la causa y deja `ClusterHealthy` en su valor previo — o ausente si nunca se observó. La observación de salud nunca bloquea la convergencia ni reintenta en caliente.
+
+Siguen ausentes hasta que exista la API Admin de lectura por servidor: `coordinator.activePod`, `assignedTablets` y `replicaHealth` por pod. Deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
 
 | Campo | Tipo | Significado |
 | --- | --- | --- |
@@ -55,7 +63,7 @@ Es un **ejemplo de estructura**, no una respuesta producida por el Operador actu
 | `tabletServers` | objeto opcional | Réplicas deseadas/listas y, por pod, `assignedTablets` y `replicaHealth` opcionales. |
 | `conditions` | lista | Indicadores operativos independientes con evidencia y momento de transición. |
 
-Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. El esquema limita `status` a `"True"`, `"False"` y `"Unknown"`, y `type` a `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy` y `OperationBlocked`. Estas comprobaciones son **comportamiento propuesto**; todavía no se ejecutan. `lastTransitionTime` sigue siendo una cadena cuyo formato y semántica quedan por implementar.
+Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. El esquema limita `status` a `"True"`, `"False"` y `"Unknown"`, y `type` a `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy` y `OperationBlocked`. Hoy corren `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable` y `ClusterHealthy`; el resto están planificadas.
 
 `getClusterHealth()` de Fluss 1.0 proporciona contadores globales. `assignedTablets` y `replicaHealth` por pod requieren la API Admin de lectura por servidor propuesta por FIP-41: deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
 

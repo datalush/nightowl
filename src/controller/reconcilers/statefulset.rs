@@ -3,6 +3,13 @@
 //! Mirrors `config_map.rs`: one [`Observation`] per StatefulSet, builder
 //! failures and foreign owners become `StatefulSetBlocked` observations so
 //! `.status` documents the block instead of hiding it.
+//!
+//! Bring-up order is explicit: the tablet StatefulSet waits for a ready
+//! coordinator replica instead of crashlooping against a coordinator that
+//! does not serve yet. The coordinator's own status flips retrigger this
+//! controller through `owns()`, so no polling is needed; and the gate only
+//! ever delays creation — updates, rollouts and recovery flow ungated, so a
+//! coordinator that never readies blocks tablets instead of wedging them.
 
 use k8s_openapi::api::apps::v1::StatefulSet;
 use kube::Api;
@@ -15,6 +22,9 @@ use crate::controller::apply;
 use crate::resources::statefulset as builder;
 
 /// Converge both StatefulSets toward the desired state.
+///
+/// Tablets wait for coordinator readiness (see module docs); the wait is
+/// reported, not hidden, and never an error.
 pub async fn reconcile(
     api: &Api<StatefulSet>,
     cluster: &FlussCluster,
@@ -22,8 +32,42 @@ pub async fn reconcile(
 ) -> Result<Vec<Observation>, Error> {
     let mut observations = Vec::with_capacity(2);
     observations.push(converge_one(api, cluster, uid, Role::Coordinator).await?);
-    observations.push(converge_one(api, cluster, uid, Role::Tablet).await?);
+    if coordinator_ready(api, cluster).await? {
+        observations.push(converge_one(api, cluster, uid, Role::Tablet).await?);
+    } else {
+        let name = format!(
+            "{}{}",
+            cluster.metadata.name.clone().ok_or(Error::MissingName)?,
+            Role::Tablet.suffix()
+        );
+        tracing::info!(statefulset = %name, "waiting for a ready coordinator replica");
+        observations.push(Observation::WaitingForCoordinator { name });
+    }
     Ok(observations)
+}
+
+/// True once the coordinator StatefulSet reports a ready replica.
+///
+/// Missing object means "not yet converged this run" — the coordinator step
+/// above just created it. API failures propagate (transient, requeued); a
+/// coordinator that never readies simply holds tablets, it never wedges
+/// them.
+async fn coordinator_ready(api: &Api<StatefulSet>, cluster: &FlussCluster) -> Result<bool, Error> {
+    let name = format!(
+        "{}{}",
+        cluster.metadata.name.clone().ok_or(Error::MissingName)?,
+        Role::Coordinator.suffix()
+    );
+    match api.get(&name).await {
+        Ok(coordinator) => Ok(coordinator
+            .status
+            .as_ref()
+            .and_then(|status| status.ready_replicas)
+            .unwrap_or(0)
+            > 0),
+        Err(kube::Error::Api(status)) if status.code == 404 => Ok(false),
+        Err(e) => Err(Error::Kube(e)),
+    }
 }
 
 #[derive(Clone, Copy)]

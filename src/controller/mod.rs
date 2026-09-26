@@ -1,4 +1,5 @@
 mod apply;
+mod fluss;
 mod guardrails;
 mod reconcile;
 mod reconcilers;
@@ -21,6 +22,7 @@ use crate::api::FlussCluster;
 /// Shared state for every reconciliation.
 pub struct Context {
     pub client: Client,
+    pub probes: fluss::ProbeClock,
 }
 
 /// Reconciler failures.
@@ -86,7 +88,10 @@ pub async fn run(client: Client, namespace: Option<String>) {
     let configmaps: Api<ConfigMap> = scoped(client.clone(), &namespace);
     let statefulsets: Api<StatefulSet> = scoped(client.clone(), &namespace);
     let pdbs: Api<PodDisruptionBudget> = scoped(client.clone(), &namespace);
-    let context = Arc::new(Context { client });
+    let context = Arc::new(Context {
+        client,
+        probes: fluss::ProbeClock::default(),
+    });
 
     Controller::new(clusters, watcher::Config::default())
         .owns(services, watcher::Config::default())

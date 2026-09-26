@@ -45,14 +45,19 @@ pub fn desired_service(cluster: &FlussCluster) -> Service {
         .listeners
         .as_ref()
         .expect("listeners is required for the client service");
-    let mut annotations = BTreeMap::new();
-    annotations.extend(listeners.client.annotations.clone());
+    // Absent when the CR sets none: an empty map would read as drift
+    // against the server's null on every trigger.
+    let annotations = if listeners.client.annotations.is_empty() {
+        None
+    } else {
+        Some(listeners.client.annotations.clone())
+    };
 
     let object_meta = ObjectMeta {
         name: Some(svc_name),
         namespace,
         labels: Some(labels.clone()),
-        annotations: Some(annotations),
+        annotations,
         owner_references: Some(vec![owner_ref]),
         ..Default::default()
     };

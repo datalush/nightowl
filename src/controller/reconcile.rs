@@ -6,6 +6,7 @@ use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use kube::Api;
 use kube::runtime::controller::Action;
 
+use super::fluss;
 use super::reconcilers::{self, Observation};
 use super::{Context, Error};
 use crate::api::FlussCluster;
@@ -54,6 +55,10 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
         observations
             .extend(reconcilers::pod_disruption_budget::reconcile(&pdbs, &cluster, &uid).await?);
     }
+    // Observe-only, always best-effort: health never gates, never errors,
+    // and rate-limits itself. Runs even when workloads are blocked — old
+    // pods from a previous good state may still answer.
+    observations.extend(fluss::probe(&cluster, &ctx.probes).await);
 
     if reconcilers::status::reconcile(&clusters, &cluster, &observations).await? {
         tracing::info!(cluster = %name, "updated FlussCluster status");

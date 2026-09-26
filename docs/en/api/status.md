@@ -1,6 +1,6 @@
 # Status and conditions
 
-`status` describes observed state. It is **not** supplied by the person creating a `FlussCluster`. The Rust API defines the following shape, but the current watcher does not populate the status subresource.
+`status` describes observed state. It is **not** supplied by the person creating a `FlussCluster`. Fields stay absent until the controller can actually observe them; an absent field is honest, an invented one is not.
 
 ```yaml
 status:
@@ -42,7 +42,15 @@ status:
       lastTransitionTime: "2026-09-25T12:00:00Z"
 ```
 
-This is a **shape example**, not output produced by the current Operator. Endpoint names and health counts are illustrative; the example shows only one of three pod entries for brevity. In particular, `observedVersion` must come from evidence of the running cluster, not just a copy of `spec.version`.
+This is a **shape example**; endpoint names and health counts are illustrative. `observedVersion` must come from evidence of the running cluster, not just a copy of `spec.version`.
+
+## Fluss-side health
+
+When the coordinator answers over the internal listener, the controller also fills `clusterHealth` (global replica/ISR/leader counts from `getClusterHealth`), `coordinatorEndpoints` (coordinator servers seen in membership), `coordinator` (desired vs registered) and `tabletServers` (desired vs registered members, one entry per server), plus the `FlussReachable` and `ClusterHealthy` conditions. Membership is Fluss-observed — strictly more honest than pod Ready for "how many servers serve".
+
+Probes run at most every 60 seconds per cluster (in-memory rate limit, no status churn); between probes the last observed values stand. An unreachable cluster reports `FlussReachable=False` with the cause and leaves `ClusterHealthy` at its previous value — or absent when never observed. Health observation never blocks convergence and never retries hot.
+
+Still absent until the per-server Admin read API exists: `coordinator.activePod`, per-pod `assignedTablets` and `replicaHealth`. They must remain absent while unavailable, not be invented from Pod readiness.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -55,7 +63,7 @@ This is a **shape example**, not output produced by the current Operator. Endpoi
 | `tabletServers` | optional object | Desired/ready replicas and optional per-pod `assignedTablets`/`replicaHealth`. |
 | `conditions` | list | Independent operational statements with evidence and transition time. |
 
-Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`; `type` is also an enum: `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, or `OperationBlocked`. These checks are **proposed behavior**, not a guarantee that they run today. `lastTransitionTime` is currently a string; formatting and transition semantics need implementation.
+Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`; `type` is also an enum: `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, or `OperationBlocked`. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable` and `ClusterHealthy` run today; the rest are planned.
 
 Fluss 1.0's `getClusterHealth()` supports global counters. The per-pod `assignedTablets` and `replicaHealth` fields require the proposed per-server Admin read API; they must remain absent while unavailable, not be invented from Pod readiness.
 
