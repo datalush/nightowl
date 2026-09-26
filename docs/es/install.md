@@ -20,7 +20,7 @@ namespaces por defecto (pasa `--namespace <nombre>` para fijar uno).
 Un clúster mínimo, tras crear el namespace y el Secret S3 que referencie:
 
 ```bash
-kubectl apply -f docs/en/examples/minio.yaml
+kubectl apply -f docs/en/examples/rustfs.yaml
 kubectl get flussclusters -A
 ```
 

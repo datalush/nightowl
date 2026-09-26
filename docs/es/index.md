@@ -15,13 +15,12 @@
 
 ## Elige un entorno
 
-| Entorno | Origen de las credenciales | Ejemplo |
-| --- | --- | --- |
-| AWS EKS | ServiceAccount existente con IRSA o EKS Pod Identity | [Manifiesto EKS](examples/aws-eks.md) |
-| MinIO | Secret de Kubernetes con clave de acceso y clave secreta | [Manifiesto MinIO](examples/minio.md) |
-| Garage | Secret de Kubernetes; compatibilidad STS aún no verificada | [Manifiesto Garage](examples/garage.md) |
+| Entorno | Origen de las credenciales | Ejemplo | Verificación |
+| --- | --- | --- | --- |
+| Laboratorio RustFS | Secret de Kubernetes con clave de acceso y clave secreta | [Manifiesto RustFS](examples/rustfs.md) | Verificado en vivo (convergencia, snapshots KV, SigV4/AssumeRole) |
+| AWS EKS | ServiceAccount existente con IRSA o EKS Pod Identity | [Manifiesto EKS](examples/aws-eks.md) | Planificada |
 
-> **Alcance de esta documentación.** Los manifiestos ilustran la API Rust actual de `operator/src/api.rs`; el proyecto todavía no crea recursos de Fluss a partir de un `FlussCluster`. Consulta el [estado actual](current-state.md) antes de aplicar un ejemplo.
+> **Alcance de esta documentación.** Los manifiestos ilustran la API Rust actual de `operator/src/api.rs` y el operador los convierte en clústeres Fluss en ejecución. Cada ejemplo indica su estado de verificación; los backends no probados no se documentan como funcionales. Consulta el [estado actual](current-state.md) antes de aplicar un ejemplo.
 
 ## Principios de diseño
 

@@ -32,7 +32,7 @@ Omitting an optional field does **not** imply that the running Operator has chos
 | `image.pullPolicy` | `Always`, `IfNotPresent`, `Never` | No | May be left to the Kubernetes workload default. |
 | `image.pullSecrets` | list of names | No | References Secrets in the **same namespace** as the FlussCluster. |
 | `zookeeper.addresses` | nonempty list of strings | Yes | Fluss expects a comma-separated `zookeeper.address`; each element should be a reachable `host:port`. |
-| `zookeeper.pathRoot` | string | No | Proposed stable default: `/fluss/<namespace>/<name>`. The derivation is not yet implemented. |
+| `zookeeper.pathRoot` | string | No | Defaults to `/fluss/<namespace>/<name>` when omitted. |
 
 Multiple Coordinators using the same ZooKeeper path participate in Fluss 1.0's leader election. A single ZooKeeper pod is still a single point of failure. Both the ZooKeeper path and remote storage location identify existing data; they should remain stable across restarts and eventual upgrades.
 
@@ -91,11 +91,11 @@ scaleIn:
 
 ## Defaults, observability, and overrides
 
-If `defaults` is present, `buckets` and `logReplicationFactor` are required and must be positive integers; `minInSyncReplicas` is optional:
+If `defaults` is present, `tableBuckets` and `logReplicationFactor` are required and must be positive integers; `minInSyncReplicas` is optional:
 
 | Field | Fluss configuration | Scope |
 | --- | --- | --- |
-| `defaults.buckets` | `default.bucket.number` | Default for new tables. |
+| `defaults.tableBuckets` | `default.bucket.number` | Default **table** buckets (sharding) for new tables — unrelated to any S3 bucket. |
 | `defaults.logReplicationFactor` | `default.replication.factor` | Default **log** replication for new tables; not the number of TabletServer pods. Must not exceed `tabletServers.replicas` (schema-enforced; the runtime backstop covers CRDs installed before the rule). |
 | `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Server-level log write durability with `acks=all` (not a per-table default). When omitted, the Operator renders the quorum default `floor(RF / 2) + 1` from the **effective** replication factor after overrides are merged (1 when RF is 1); an explicit value must not exceed it. Even replication factors trade availability for durability under this default — documented, not forbidden. Applies to writes that require all acknowledgments; coordinate it with client acknowledgement settings. |
 

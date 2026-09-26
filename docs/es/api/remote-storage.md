@@ -9,7 +9,7 @@ Fluss usa discos locales de los TabletServers para los datos recientes y **almac
 | `bucket` | cadena | Sí | Bucket existente; el Operador no lo crea. |
 | `prefix` | cadena | Sí | Prefijo exclusivo para este `FlussCluster`. No debe compartirse con otro clúster. |
 | `region` | cadena | Sí | Región que recibe el plugin S3 de Fluss. |
-| `endpoint` | URL | No | Endpoint S3 compatible, normalmente MinIO o Garage. |
+| `endpoint` | URL | No | Endpoint S3 compatible, p. ej. el RustFS del laboratorio. |
 | `pathStyleAccess` | booleano | No | `false` por defecto; utiliza `true` con endpoints S3 compatibles locales. |
 | `authentication` | objeto con discriminador | Sí | `workloadIdentity` o `secret`. |
 | `delegation` | objeto con discriminador | No | `assumeRole` o `getSessionToken`; consulta la distinción siguiente. |
@@ -48,7 +48,7 @@ delegation:
   type: getSessionToken
 ```
 
-El Secret debe existir en el **mismo namespace** que FlussCluster. Los futuros pods lo montarán como archivos de solo lectura y el ConfigMap contendrá marcadores de Fluss, no los valores de las credenciales:
+El Secret debe existir en el **mismo namespace** que FlussCluster. Los pods lo montan como archivos de solo lectura y el ConfigMap contiene marcadores de Fluss, no los valores de las credenciales:
 
 ```yaml
 config.providers: directory
@@ -57,7 +57,7 @@ s3.access-key: ${directory:/etc/fluss/secrets/s3:access-key}
 s3.secret-key: ${directory:/etc/fluss/secrets/s3:secret-key}
 ```
 
-Fluss resuelve los marcadores al arrancar, por lo que rotar el Secret exige reiniciar los servidores afectados. **El montaje y el reinicio aún no están implementados.**
+Fluss resuelve los marcadores al arrancar, por lo que rotar el Secret exige reiniciar los servidores afectados. El montaje está implementado (verificado en vivo contra RustFS); la semántica de reinicio tras rotación se sigue por separado.
 
 ## La delegación es otro requisito de compatibilidad
 
@@ -65,11 +65,9 @@ Que el servidor lea y escriba objetos S3 no demuestra que Fluss pueda emitir cre
 
 | Backend | Qué expresa la API | Qué queda por verificar |
 | --- | --- | --- |
-| AWS S3 | Identidad EKS con `assumeRole`; claves estáticas con el modo STS elegido. | Confianza y permisos IAM, tokens para clientes, snapshots, recuperación y failover. |
-| MinIO | Secret, endpoint propio, acceso por ruta y modo STS elegido. | Que la **versión y configuración concreta de MinIO** admita la petición STS de Fluss y las credenciales devueltas. |
-| RustFS | Secret, endpoint propio, acceso por ruta, AssumeRole. | Verificado el 2026-09-26 contra la instancia del lab: round-trip de bucket (put/get/list/delete) desde pods del clúster, y `AssumeRole` devuelve credenciales temporales que autorizan operaciones S3. Los snapshots KV y los tokens emitidos por Fluss aún necesitan un runtime Fluss apuntando al backend. |
-| Garage | Secret, endpoint propio y acceso por ruta. | Sus operaciones S3 documentadas no acreditan compatibilidad con la delegación STS de Fluss. No implica compatibilidad KV o de clientes. |
+| AWS S3 | Identidad EKS con `assumeRole`; claves estáticas con el modo STS elegido. | Planificado: confianza y permisos IAM, tokens para clientes, snapshots, recuperación y failover. |
+| RustFS | Secret, endpoint propio, acceso por ruta, AssumeRole. | Verificado el 2026-09-26 contra la instancia del lab (1.0.0): round-trip de bucket desde pods del clúster, credenciales `AssumeRole` que autorizan operaciones S3 y snapshots KV escritos por tablets gestionadas bajo el prefijo del clúster. La restauración entre servidores y los tokens emitidos por Fluss quedan aparte. |
 
-`delegation` es opcional con claves estáticas; omitirlo **no** demuestra que el backend emita tokens. La CRD generada incluye reglas CEL que exigen `assumeRole` con `workloadIdentity` y comprueban que `secretRef`, `serviceAccountName` y `roleArn` concuerden con el `type` elegido. La CRD instalada previamente no tendrá esas reglas hasta actualizarse. El reconciler comprueba el Secret real (existencia más claves referenciadas) y el ServiceAccount antes de informar `RemoteStorageReady`, y si falta algo lo rechaza con evidencia que lo nombra; que un Secret o ServiceAccount aparezca después no re-dispara la reconciliación por sí solo —lo hace el siguiente evento observado. Esto necesita `get` en Secrets y ServiceAccounts del namespace del clúster (RBAC de despliegue real, pendiente en 5vrz). Las operaciones S3 básicas están verificadas contra el RustFS del lab; los snapshots KV y el flujo de tokens emitido por Fluss aún necesitan un runtime Fluss apuntando a un backend. Los ejemplos son manifiestos de la API, no certificaciones de compatibilidad.
+`delegation` es opcional con claves estáticas; omitirlo **no** demuestra que el backend emita tokens. La CRD generada incluye reglas CEL que exigen `assumeRole` con `workloadIdentity` y comprueban que `secretRef`, `serviceAccountName` y `roleArn` concuerden con el `type` elegido. La CRD instalada previamente no tendrá esas reglas hasta actualizarse. El reconciler comprueba el Secret real (existencia más claves referenciadas) y el ServiceAccount antes de informar `RemoteStorageReady`, y si falta algo lo rechaza con evidencia que lo nombra; que un Secret o ServiceAccount aparezca después no re-dispara la reconciliación por sí solo —lo hace el siguiente evento observado. Las operaciones S3 básicas y los snapshots KV están verificados contra el RustFS del lab; la restauración entre servidores y el flujo de tokens emitido por Fluss se siguen por separado. Los ejemplos son manifiestos de la API, no certificaciones de compatibilidad.
 
-Fuentes: [configuración S3 de Fluss 1.0](https://fluss.apache.org/docs/maintenance/tiered-storage/filesystems/s3/), [proveedores de secretos de Fluss 1.0](https://fluss.apache.org/docs/security/secrets/), [IRSA de EKS](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html), [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html), [matriz S3 de Garage](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/) y [documentación STS de RustFS](https://docs.rustfs.com/en/security-compliance/iam/sts).
+Fuentes: [configuración S3 de Fluss 1.0](https://fluss.apache.org/docs/maintenance/tiered-storage/filesystems/s3/), [proveedores de secretos de Fluss 1.0](https://fluss.apache.org/docs/security/secrets/), [IRSA de EKS](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html), [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) y [documentación STS de RustFS](https://docs.rustfs.com/en/security-compliance/iam/sts).

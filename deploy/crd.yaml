@@ -1689,10 +1689,6 @@ spec:
               defaults:
                 nullable: true
                 properties:
-                  buckets:
-                    format: int32
-                    minimum: 1.0
-                    type: integer
                   logReplicationFactor:
                     format: int32
                     minimum: 1.0
@@ -1702,9 +1698,16 @@ spec:
                     minimum: 1.0
                     nullable: true
                     type: integer
+                  tableBuckets:
+                    description: "Default table buckets (sharding) for new tables\
+                      \ \u2014 unrelated to any\nS3 bucket. Named explicitly after\
+                      \ the S3/table-bucket confusion."
+                    format: int32
+                    minimum: 1.0
+                    type: integer
                 required:
-                - buckets
                 - logReplicationFactor
+                - tableBuckets
                 type: object
                 x-kubernetes-validations:
                 - message: minInSyncReplicas must not exceed logReplicationFactor

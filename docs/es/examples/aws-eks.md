@@ -1,8 +1,8 @@
 # AWS EKS
 
-**Identidad del pod · Amazon S3 · Alta disponibilidad del Coordinator**
+**Identidad del pod · Amazon S3 · Alta disponibilidad del Coordinator · verificación planificada**
 
-Este manifiesto muestra la API actual de `FlussCluster` con dos Coordinators, tres TabletServers y Amazon S3. El watcher actual **no lo despliega**; consulta el [estado actual](../current-state.md).
+Este manifiesto muestra la API actual de `FlussCluster` con dos Coordinators, tres TabletServers y Amazon S3. El operador converge esta forma (services, config, StatefulSets, PDBs, scheduling, JVM), pero aún no se ha verificado contra AWS real; consulta el [estado actual](../current-state.md).
 
 ```yaml
 {{#include ../../en/examples/aws-eks.yaml}}
@@ -18,6 +18,6 @@ Fluss 1.0 usa la cadena de credenciales AWS predeterminada con IRSA. EKS Pod Ide
 
 ## Significado operativo
 
-`spreadAcrossNodes` expresa la intención de repartir réplicas entre nodos; el programa actual no genera aún reglas de ubicación. `jvm.heap` debe dejar memoria suficiente por debajo del límite del contenedor para usos fuera del heap. Los listeners deberán determinar tanto los Services como la configuración de Fluss. El PDB solicita `maxUnavailable: 0` para tablets; `scaleIn: Block` exige además una comprobación de Fluss, y los tiempos de `rollingUpgrade` **no** activan actualizaciones por sí solos.
+`spreadAcrossNodes` genera un reparto suave por hostname; node selectors, afinidad y tolerations pasan a los pods. `jvm.heap` debe dejar memoria suficiente por debajo del límite del contenedor para usos fuera del heap (el operador bloquea heaps mayores que la memoria). Los listeners determinan tanto los Services como la configuración de Fluss. El PDB solicita `maxUnavailable: 0` para tablets; `scaleIn: Block` exige además una comprobación de Fluss, y los tiempos de `rollingUpgrade` **no** activan actualizaciones por sí solos.
 
 El factor de replicación predeterminado se aplica a **tablas nuevas**. Tener dos Coordinators no garantiza por sí solo la disponibilidad de ZooKeeper ni del bucket S3. El almacenamiento, las actualizaciones y la reducción segura requieren el ciclo de vida explicado en la [referencia de la API](../api/fluss-cluster.md#cambios-en-un-cluster-existente).

@@ -13,5 +13,4 @@
 # Configuration examples
 
 - [AWS EKS](examples/aws-eks.md)
-- [MinIO](examples/minio.md)
-- [Garage](examples/garage.md)
+- [RustFS](examples/rustfs.md)

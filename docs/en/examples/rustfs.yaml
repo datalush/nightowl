@@ -1,7 +1,7 @@
 apiVersion: fluss.datalush.com/v1alpha1
 kind: FlussCluster
 metadata:
-  name: minio-lab
+  name: rustfs-lab
   namespace: data
 spec:
   version: "1.0.0"
@@ -11,7 +11,7 @@ spec:
   zookeeper:
     addresses:
       - zk-zookeeper.fluss.svc.cluster.local:2181
-    pathRoot: /fluss/data/minio-lab
+    pathRoot: /fluss/data/rustfs-lab
   coordinator:
     replicas: 1
     resources:
@@ -37,14 +37,14 @@ spec:
     onNonEmptyTabletServer: Block
   remoteStorage:
     s3:
-      bucket: fluss
-      prefix: clusters/data/minio-lab
+      bucket: fluss-lab
+      prefix: clusters/data/rustfs-lab
       region: us-east-1
-      endpoint: http://minio.storage.svc.cluster.local:9000
+      endpoint: http://192.168.68.200:9000
       pathStyleAccess: true
       authentication:
         type: secret
         secretRef:
-          name: fluss-minio
+          name: fluss-rustfs
           accessKeyKey: access-key
           secretKeyKey: secret-key

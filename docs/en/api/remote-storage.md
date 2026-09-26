@@ -9,7 +9,7 @@ Fluss uses local TabletServer disks for hot data and **shared remote storage** f
 | `bucket` | string | Yes | Existing bucket; the Operator does not provision it. |
 | `prefix` | string | Yes | Dedicated key prefix for this FlussCluster. Do not share it with another cluster. |
 | `region` | string | Yes | Region passed to the Fluss S3 filesystem plugin. |
-| `endpoint` | URL | No | Custom S3-compatible endpoint, typically MinIO or Garage. |
+| `endpoint` | URL | No | Custom S3-compatible endpoint, e.g. the lab RustFS. |
 | `pathStyleAccess` | boolean | No | Defaults to `false`; set to `true` for local S3-compatible endpoints. |
 | `authentication` | tagged object | Yes | Either `workloadIdentity` or `secret`. |
 | `delegation` | tagged object | No | `assumeRole` or `getSessionToken`; see the distinction below. |
@@ -48,7 +48,7 @@ delegation:
   type: getSessionToken
 ```
 
-The Secret must exist in the **same namespace** as the FlussCluster. The intended workload mounts it as read-only files and renders Fluss configuration markers, not credential values, into the ConfigMap:
+The Secret must exist in the **same namespace** as the FlussCluster. The workload mounts it as read-only files and renders Fluss configuration markers, not credential values, into the ConfigMap:
 
 ```yaml
 config.providers: directory
@@ -57,7 +57,7 @@ s3.access-key: ${directory:/etc/fluss/secrets/s3:access-key}
 s3.secret-key: ${directory:/etc/fluss/secrets/s3:secret-key}
 ```
 
-Fluss resolves these markers at startup, so rotating a Secret requires restarting the relevant servers. This mount and restart behavior is **not implemented yet**.
+Fluss resolves these markers at startup, so rotating a Secret requires restarting the relevant servers. The mount is implemented (verified live against RustFS); restart-on-rotation semantics are tracked separately.
 
 ## Delegation is a separate compatibility requirement
 
@@ -65,11 +65,9 @@ The server's ability to read and write S3 objects does not imply that Fluss can 
 
 | Backend | What the API expresses | What must be verified |
 | --- | --- | --- |
-| AWS S3 | EKS workload identity with `assumeRole`; static keys with a selected STS mode. | IAM trust and permissions, client-token flow, snapshot/restore, and failover. |
-| MinIO | Secret, custom endpoint, path-style, chosen STS mode. | The **specific MinIO version/configuration** must accept the STS request Fluss sends and the returned credentials. |
-| RustFS | Secret, custom endpoint, path-style, AssumeRole. | Verified 2026-09-26 against the lab instance: bucket round-trip (put/get/list/delete) from cluster pods, and `AssumeRole` returns temporary credentials that authorize S3 operations. KV snapshots and Fluss-issued client tokens still need a Fluss runtime pointed at it. |
-| Garage | Secret, custom endpoint, path-style. | Garage's documented S3 operations do not establish support for Fluss's STS delegation flow. Do not infer full KV/client compatibility. |
+| AWS S3 | EKS workload identity with `assumeRole`; static keys with a selected STS mode. | Planned: IAM trust and permissions, client-token flow, snapshot/restore, and failover. |
+| RustFS | Secret, custom endpoint, path-style, AssumeRole. | Verified 2026-09-26 against the lab instance (1.0.0): bucket round-trip from cluster pods, `AssumeRole` credentials authorizing S3 operations, and KV snapshots written by operator-managed tablets under the cluster prefix. Cross-server restore and Fluss-issued client tokens remain separate. |
 
-`delegation` is optional with static keys; omission does **not** assert that the backend supports token issuance. The generated CRD now includes CEL rules requiring `assumeRole` with `workloadIdentity` and matching `secretRef` / `serviceAccountName` / `roleArn` to their selected `type`. An older installed CRD will not contain those rules until updated. The reconciler verifies the actual Secret (existence plus referenced keys) and ServiceAccount before reporting `RemoteStorageReady`, refusing with evidence naming the missing object otherwise; a Secret or ServiceAccount appearing later does not retrigger reconciliation on its own — the next watched event does. This needs `get` on Secrets and ServiceAccounts in the cluster namespace (real-deployment RBAC, tracked under 5vrz). Basic S3 operations are verified against lab RustFS; KV snapshots and Fluss-issued client token flow still need a Fluss runtime pointed at a backend. The examples are API manifests, not compatibility certifications.
+`delegation` is optional with static keys; omission does **not** assert that the backend supports token issuance. The generated CRD now includes CEL rules requiring `assumeRole` with `workloadIdentity` and matching `secretRef` / `serviceAccountName` / `roleArn` to their selected `type`. An older installed CRD will not contain those rules until updated. The reconciler verifies the actual Secret (existence plus referenced keys) and ServiceAccount before reporting `RemoteStorageReady`, refusing with evidence naming the missing object otherwise; a Secret or ServiceAccount appearing later does not retrigger reconciliation on its own — the next watched event does. Basic S3 operations and KV snapshots are verified against lab RustFS; cross-server restore and the Fluss-issued client token flow are tracked separately. The examples are API manifests, not compatibility certifications.
 
-Sources: [Fluss 1.0 S3 configuration](https://fluss.apache.org/docs/maintenance/tiered-storage/filesystems/s3/), [Fluss 1.0 secret providers](https://fluss.apache.org/docs/security/secrets/), [EKS IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html), [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html), [Garage's S3 compatibility matrix](https://garagehq.deuxfleurs.fr/documentation/reference-manual/s3-compatibility/), and [RustFS STS documentation](https://docs.rustfs.com/en/security-compliance/iam/sts).
+Sources: [Fluss 1.0 S3 configuration](https://fluss.apache.org/docs/maintenance/tiered-storage/filesystems/s3/), [Fluss 1.0 secret providers](https://fluss.apache.org/docs/security/secrets/), [EKS IRSA](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html), [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html), and [RustFS STS documentation](https://docs.rustfs.com/en/security-compliance/iam/sts).

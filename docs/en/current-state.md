@@ -1,22 +1,22 @@
 # What works today
 
-The `FlussCluster` schema is defined in `operator/src/api.rs`. It is a **proposed deployment contract**, not a statement that all the behavior described by the contract already runs. Documentation in this book follows the Rust types; Fluss server capabilities are called out separately.
+The `FlussCluster` schema is defined in `operator/src/api.rs` and the controller converges it into running Fluss clusters. Capabilities below are verified live in k3d unless marked otherwise.
 
 | Capability | Current state |
 | --- | --- |
-| Define and serialize `FlussCluster` | Implemented in Rust; the schema has changed since the CRD was first installed in the development cluster. |
-| Observe custom resources | `src/main.rs` watches `FlussCluster` in `operator-dev` and prints names and versions. |
-| Watch all namespaces | Not implemented; the current process is scoped to `operator-dev`. |
-| Create CoordinatorServers or TabletServers | Not implemented. The existing Fluss lab is managed by Helm, not this Operator. |
-| Configure S3 or mount credential Secrets | Represented in the API only; no workload renders these fields yet. |
-| Populate `.status` | The Rust status type exists; no status controller writes to Kubernetes. |
-| Safe restart, upgrade, scale-in, or recovery | Not implemented. No spec update should be assumed to perform these operations. |
+| Define and validate `FlussCluster` | Implemented; CEL rules enforced live, checked-in CRD tested for drift. |
+| Watch all namespaces (or one via flag) | Implemented; same-name clusters isolated per namespace, verified. |
+| Run CoordinatorServers and TabletServers | Implemented; per-ordinal identity, staged config, hash-pinned rollouts. |
+| Configure S3 and mount credential Secrets | Implemented and verified against RustFS (KV snapshots land in the bucket). |
+| Least-privilege RBAC | Implemented; verified under its own ServiceAccount with zero `Forbidden`. |
+| Populate `.status` | Implemented: resources, storage, reachability and cluster health with evidence. |
+| JVM heap, PVCs, PDBs, scheduling, client Service | Implemented; oversized heaps blocked before pods converge. |
+| Safe restart, upgrade, scale-in, recovery | Partial: restarts and recovery verified; controlled upgrade/scale-in pending. |
+| Cross-server restore, client tokens, real AWS | Not verified yet; tracked separately. |
 
 ## Using the examples
 
-The example manifests are **API examples**, not installation instructions. Their fields are valid according to the Rust data model, but the installed CRD may still contain an older schema, and applying a resource does not deploy a Fluss cluster until reconciliation exists. Avoid treating Kubernetes admission as a storage or IAM compatibility test.
-
-The [EKS](examples/aws-eks.md), [MinIO](examples/minio.md), and [Garage](examples/garage.md) pages explain their different credential and delegation assumptions. In particular, the presence of an S3 URI does not prove that Fluss can obtain delegation tokens or recover a KV tablet on another server.
+The example manifests deploy real clusters; each carries its verification status. The [EKS](examples/aws-eks.md) and [RustFS](examples/rustfs.md) pages explain their different credential and delegation assumptions. In particular, the presence of an S3 URI does not prove that Fluss can obtain delegation tokens or recover a KV tablet on another server.
 
 ## Local documentation workflow
 

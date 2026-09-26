@@ -31,7 +31,7 @@ pub(crate) fn properties(cluster: &FlussCluster) -> BTreeMap<String, String> {
     if let Some(defaults) = cluster.spec.defaults.as_ref() {
         props.insert(
             "default.bucket.number".to_string(),
-            defaults.buckets.to_string(),
+            defaults.table_buckets.to_string(),
         );
         props.insert(
             REPLICATION_FACTOR_KEY.to_string(),

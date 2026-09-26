@@ -32,7 +32,7 @@ Omitir un campo opcional **no** implica que el Operador ya haya elegido un valor
 | `image.pullPolicy` | `Always`, `IfNotPresent`, `Never` | No | Puede utilizar el valor predeterminado del workload de Kubernetes. |
 | `image.pullSecrets` | lista de nombres | No | Referencias a Secrets del **mismo namespace** que `FlussCluster`. |
 | `zookeeper.addresses` | lista no vacía de cadenas | Sí | Fluss recibe `zookeeper.address` separado por comas; cada entrada debería ser un `host:puerto` accesible. |
-| `zookeeper.pathRoot` | cadena | No | Valor estable propuesto: `/fluss/<namespace>/<nombre>`. Aún no se deriva automáticamente. |
+| `zookeeper.pathRoot` | cadena | No | Por defecto `/fluss/<namespace>/<nombre>` si se omite. |
 
 Varios Coordinators con el mismo path de ZooKeeper participan en la elección de líder de Fluss 1.0. Un único pod ZooKeeper sigue siendo un punto único de fallo. Tanto la ruta de ZooKeeper como la ubicación remota identifican datos existentes: deben mantenerse estables durante reinicios y futuras actualizaciones.
 
@@ -91,11 +91,11 @@ scaleIn:
 
 ## Valores predeterminados, observabilidad y opciones avanzadas
 
-Si se incluye `defaults`, `buckets` y `logReplicationFactor` son obligatorios y deben ser enteros positivos; `minInSyncReplicas` es opcional:
+Si se incluye `defaults`, `tableBuckets` y `logReplicationFactor` son obligatorios y deben ser enteros positivos; `minInSyncReplicas` es opcional:
 
 | Campo | Configuración de Fluss | Alcance |
 | --- | --- | --- |
-| `defaults.buckets` | `default.bucket.number` | Valor predeterminado para tablas nuevas. |
+| `defaults.tableBuckets` | `default.bucket.number` | Buckets de **tabla** (sharding) predeterminados para tablas nuevas — sin relación con ningún bucket S3. |
 | `defaults.logReplicationFactor` | `default.replication.factor` | Replicación predeterminada del **log** en tablas nuevas; no cuenta pods TabletServer. No debe superar `tabletServers.replicas` (verificado por el esquema; el backstop runtime cubre CRDs instaladas antes de la regla). |
 | `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Durabilidad de escritura de log a nivel de servidor con `acks=all` (no es un predeterminado por tabla). Si se omite, el Operador genera el quorum `floor(RF / 2) + 1` a partir del factor de replicación **efectivo** tras fusionar overrides (1 cuando RF es 1); un valor explícito no debe superarlo. Con factores de replicación pares esto prima durabilidad sobre disponibilidad —documentado, no prohibido. Afecta a escrituras que esperan confirmación de todas las réplicas; coordinar con los ajustes de confirmación del cliente. |
 

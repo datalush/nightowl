@@ -1,8 +1,8 @@
 # AWS EKS
 
-**Workload identity · Amazon S3 · Coordinator HA**
+**Workload identity · Amazon S3 · Coordinator HA · verification planned**
 
-This manifest demonstrates the current `FlussCluster` API for two Coordinators, three TabletServers, and Amazon S3. It is **not deployable by the current watcher**; see [What works today](../current-state.md).
+This manifest demonstrates the current `FlussCluster` API for two Coordinators, three TabletServers, and Amazon S3. The operator converges this shape (services, config, StatefulSets, PDBs, scheduling, JVM), but no run against real AWS has verified it yet; see [What works today](../current-state.md).
 
 ```yaml
 {{#include aws-eks.yaml}}
@@ -18,6 +18,6 @@ Fluss 1.0 uses the AWS default credential chain for IRSA; EKS Pod Identity also 
 
 ## Operational meaning
 
-`spreadAcrossNodes` expresses intent to avoid putting all replicas on one node; no scheduling policy is rendered by the current program. `jvm.heap` must leave room under the container's memory limit for off-heap use. Listener names/ports would drive both Services and Fluss configuration. The PDB requests `maxUnavailable: 0` for TabletServers; `scaleIn: Block` requires a separate Fluss-aware check, and `rollingUpgrade` timeouts do **not** enable upgrades on their own.
+`spreadAcrossNodes` renders a soft hostname spread; node selectors, affinity and tolerations pass through to the pods. `jvm.heap` must leave room under the container's memory limit for off-heap use (the operator blocks heaps larger than container memory). Listener names/ports drive both the Services and the Fluss configuration. The PDB requests `maxUnavailable: 0` for TabletServers; `scaleIn: Block` requires a separate Fluss-aware check, and `rollingUpgrade` timeouts do **not** enable upgrades on their own.
 
 The default log replication factor applies to **new tables**. Running two Coordinators does not make the external ZooKeeper ensemble or S3 bucket highly available by itself. Storage, upgrades, and safe scale-in require the lifecycle work described in [the API reference](../api/fluss-cluster.md#changes-to-a-running-cluster).

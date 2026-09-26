@@ -15,13 +15,12 @@
 
 ## Choose an environment
 
-| Environment | Credential source | Example |
-| --- | --- | --- |
-| AWS EKS | Existing ServiceAccount using IRSA or EKS Pod Identity | [EKS manifest](examples/aws-eks.md) |
-| MinIO | Kubernetes Secret with access and secret keys | [MinIO manifest](examples/minio.md) |
-| Garage | Kubernetes Secret; STS compatibility remains unverified | [Garage manifest](examples/garage.md) |
+| Environment | Credential source | Example | Verification |
+| --- | --- | --- | --- |
+| RustFS lab | Kubernetes Secret with access and secret keys | [RustFS manifest](examples/rustfs.md) | Verified live (converge, KV snapshots, SigV4/AssumeRole) |
+| AWS EKS | Existing ServiceAccount using IRSA or EKS Pod Identity | [EKS manifest](examples/aws-eks.md) | Planned |
 
-> **Documentation scope.** The manifests illustrate the current Rust API in `operator/src/api.rs`; this project does not yet create Fluss resources from a `FlussCluster`. See [What works today](current-state.md) before applying an example.
+> **Documentation scope.** The manifests illustrate the current Rust API in `operator/src/api.rs` and the operator converges them into running Fluss clusters. Examples carry their verification status; untested backends are not documented as working. See [What works today](current-state.md) before applying an example.
 
 ## Design principles
 

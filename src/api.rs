@@ -363,8 +363,10 @@ pub enum S3DelegationSpec {
 }]))]
 #[serde(rename_all = "camelCase")]
 pub struct TableDefaultsSpec {
+    /// Default table buckets (sharding) for new tables — unrelated to any
+    /// S3 bucket. Named explicitly after the S3/table-bucket confusion.
     #[schemars(range(min = 1))]
-    pub buckets: i32,
+    pub table_buckets: i32,
     #[schemars(range(min = 1))]
     pub log_replication_factor: i32,
     #[schemars(range(min = 1))]
@@ -551,8 +553,7 @@ mod tests {
     fn documented_manifests_match_the_rust_api() {
         for yaml in [
             include_str!("../docs/en/examples/aws-eks.yaml"),
-            include_str!("../docs/en/examples/minio.yaml"),
-            include_str!("../docs/en/examples/garage.yaml"),
+            include_str!("../docs/en/examples/rustfs.yaml"),
         ] {
             let cluster: FlussCluster =
                 serde_yaml::from_str(yaml).expect("documented FlussCluster must deserialize");

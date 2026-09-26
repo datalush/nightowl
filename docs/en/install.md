@@ -21,7 +21,7 @@ A minimal cluster, after creating the namespace and any S3 Secret it
 references:
 
 ```bash
-kubectl apply -f docs/en/examples/minio.yaml
+kubectl apply -f docs/en/examples/rustfs.yaml
 kubectl get flussclusters -A
 ```
 
