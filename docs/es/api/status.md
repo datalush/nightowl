@@ -59,4 +59,4 @@ Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `la
 
 `getClusterHealth()` de Fluss 1.0 proporciona contadores globales. `assignedTablets` y `replicaHealth` por pod requieren la API Admin de lectura por servidor propuesta por FIP-41: deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
 
-Un pod listo en Kubernetes no demuestra que Fluss esté saludable. En el futuro, `RemoteStorageReady=True` exigirá evidencia de operaciones remotas reales; reiniciar o reducir servidores requiere algo más que una sonda TCP.
+Un pod listo en Kubernetes no demuestra que Fluss esté saludable. `RemoteStorageReady=True` lleva evidencia de resolución de referencias (Secret referenciado con sus claves, o ServiceAccount, presentes) —no demuestra operaciones remotas; reiniciar o reducir servidores requiere algo más que una sonda TCP.

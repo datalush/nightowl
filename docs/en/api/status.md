@@ -59,4 +59,4 @@ Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastT
 
 Fluss 1.0's `getClusterHealth()` supports global counters. The per-pod `assignedTablets` and `replicaHealth` fields require the proposed per-server Admin read API; they must remain absent while unavailable, not be invented from Pod readiness.
 
-Kubernetes Pod readiness alone does not prove Fluss health. A future `RemoteStorageReady=True` needs evidence of actual remote operations, and any decision to restart or scale in needs stronger Fluss-specific evidence than a TCP probe.
+Kubernetes Pod readiness alone does not prove Fluss health. `RemoteStorageReady=True` carries reference-resolution evidence (referenced Secret with its keys, or ServiceAccount, present) — it does not assert remote operations, and any decision to restart or scale in needs stronger Fluss-specific evidence than a TCP probe.
