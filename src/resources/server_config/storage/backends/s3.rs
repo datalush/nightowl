@@ -6,6 +6,21 @@ use crate::api::{S3AuthenticationSpec, S3DelegationSpec, S3StorageSpec};
 ///
 /// Takes the narrowest input (`&S3StorageSpec`, not the whole cluster) so a
 /// future backend dispatcher can call it without refactoring.
+/// Keys rendered here that users must not override: the S3 wiring is
+/// validated as a unit (location, access, credentials, delegation).
+pub(crate) const PROTECTED_KEYS: &[&str] = &[
+    "remote.data.dirs",
+    "s3.region",
+    "s3.endpoint",
+    "s3.path-style-access",
+    "config.providers",
+    "config.providers.directory.param.allowed.paths",
+    "s3.access-key",
+    "s3.secret-key",
+    "s3.assumed.role.arn",
+    "s3.assumed.role.sts.endpoint",
+];
+
 pub(crate) fn properties(spec: &S3StorageSpec) -> BTreeMap<String, String> {
     let bucket = spec.bucket.clone();
     let prefix = spec.prefix.clone();

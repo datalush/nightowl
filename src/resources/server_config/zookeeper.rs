@@ -8,6 +8,11 @@ use crate::api::FlussCluster;
 ///   what Fluss expects.
 /// - `zookeeper.path.root`: `pathRoot` when the CR sets it, otherwise a
 ///   stable default derived from the cluster identity.
+///
+/// Keys rendered here that users must not override: cluster identity
+/// and topology owned by the Operator.
+pub(crate) const PROTECTED_KEYS: &[&str] = &["zookeeper.address", "zookeeper.path.root"];
+
 pub(crate) fn properties(cluster: &FlussCluster) -> BTreeMap<String, String> {
     let path_root = cluster.spec.zookeeper.path_root.clone().unwrap_or_else(|| {
         let namespace = cluster

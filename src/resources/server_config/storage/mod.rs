@@ -23,6 +23,10 @@ pub(crate) fn properties(cluster: &FlussCluster) -> BTreeMap<String, String> {
     backends::s3::properties(&cluster.spec.remote_storage.s3)
 }
 
+/// Key resolved here that users must not override: the data directory
+/// must match the StatefulSet volume mount.
+pub(crate) const PROTECTED_KEYS: &[&str] = &["data.dir"];
+
 /// Resolve the tablet data directory.
 ///
 /// `storage.data_dir` when the CR sets it, otherwise [`DEFAULT_DATA_DIR`].

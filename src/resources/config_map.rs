@@ -12,7 +12,9 @@ use crate::utils::render;
 
 use super::server_config;
 
-pub fn desired_coordinator_config(cluster: &FlussCluster) -> ConfigMap {
+pub fn desired_coordinator_config(
+    cluster: &FlussCluster,
+) -> Result<ConfigMap, server_config::ConfigError> {
     let name = cluster
         .metadata
         .name
@@ -54,19 +56,27 @@ pub fn desired_coordinator_config(cluster: &FlussCluster) -> ConfigMap {
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
     properties.extend(server_config::table_defaults::properties(cluster));
+    let mut properties = server_config::overrides::apply(
+        properties,
+        &cluster.spec.configuration_overrides,
+        &cluster.spec.coordinator.configuration_overrides,
+    )?;
+    server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
 
     let server_yaml = render::to_yaml(&properties);
     let data = BTreeMap::from([(CONFIG_DATA_KEY.to_string(), server_yaml)]);
 
-    ConfigMap {
+    Ok(ConfigMap {
         metadata: object_meta,
         data: Some(data),
         binary_data: None,
         immutable: None,
-    }
+    })
 }
 
-pub fn desired_tablet_config(cluster: &FlussCluster) -> ConfigMap {
+pub fn desired_tablet_config(
+    cluster: &FlussCluster,
+) -> Result<ConfigMap, server_config::ConfigError> {
     let name = cluster
         .metadata
         .name
@@ -112,14 +122,20 @@ pub fn desired_tablet_config(cluster: &FlussCluster) -> ConfigMap {
         "data.dir".to_string(),
         server_config::storage::data_dir(cluster),
     );
+    let mut properties = server_config::overrides::apply(
+        properties,
+        &cluster.spec.configuration_overrides,
+        &cluster.spec.tablet_servers.configuration_overrides,
+    )?;
+    server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
 
     let server_yaml = render::to_yaml(&properties);
     let data = BTreeMap::from([(CONFIG_DATA_KEY.to_string(), server_yaml)]);
 
-    ConfigMap {
+    Ok(ConfigMap {
         metadata: object_meta,
         data: Some(data),
         binary_data: None,
         immutable: None,
-    }
+    })
 }
