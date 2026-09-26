@@ -45,6 +45,10 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
     FlussClusterStatus {
         observed_generation: cluster.metadata.generation,
         observed_version: Some(cluster.spec.version.clone()),
+        observed_config_hash: observations.iter().find_map(|o| match o {
+            Observation::ConfigHash { value } => Some(value.clone()),
+            _ => None,
+        }),
         conditions: vec![
             FlussClusterCondition {
                 condition_type: FlussConditionType::KubernetesResourcesReady,
@@ -139,6 +143,9 @@ fn service_condition(
                 ApplyOutcome::Unchanged => "converged",
             };
             evidence.push(format!("configmap {name} {detail}"));
+        }
+        if let Observation::ConfigHash { value } = o {
+            evidence.push(format!("config hash {value}"));
         }
     }
 

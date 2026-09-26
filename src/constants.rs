@@ -45,6 +45,14 @@ pub const PORT_NAME_INTERNAL: &str = "internal";
 /// Key inside the generated ConfigMaps holding the rendered `server.yaml`.
 pub const CONFIG_DATA_KEY: &str = "server.yaml";
 
+/// Annotation on the generated ConfigMaps holding the `sha256:<hex>` hash
+/// of their own rendered `server.yaml`.
+///
+/// Future StatefulSets key their pod-template rollout on this annotation;
+/// the cluster-level [`crate::api::FlussClusterStatus::observed_config_hash`]
+/// hashes both documents instead.
+pub const CONFIG_HASH_ANNOTATION: &str = "fluss.datalush.com/config-hash";
+
 /// Default tablet data directory when the CR sets no `storage.data_dir`.
 ///
 /// Shared with the future StatefulSet: its data volume must mount exactly

@@ -17,6 +17,7 @@ pub enum Observation {
     ServiceBlocked { name: String, message: String },
     ConfigMapConverged { name: String, outcome: ApplyOutcome },
     ConfigMapBlocked { name: String, message: String },
+    ConfigHash { value: String },
     StorageReady { evidence: Vec<String> },
     StorageBlocked { name: String, message: String },
     TopologyBlocked { message: String },

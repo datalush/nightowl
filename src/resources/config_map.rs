@@ -5,10 +5,11 @@ use k8s_openapi::apimachinery::pkg::apis::meta::v1::{ObjectMeta, OwnerReference}
 
 use crate::api::FlussCluster;
 use crate::constants::{
-    API_VERSION, CONFIG_DATA_KEY, COORDINATOR_CONFIG_SUFFIX, KIND_FLUSS_CLUSTER, LABEL_CLUSTER,
-    LABEL_ROLE, ROLE_COORDINATOR, ROLE_TABLET, TABLET_CONFIG_SUFFIX,
+    API_VERSION, CONFIG_DATA_KEY, CONFIG_HASH_ANNOTATION, COORDINATOR_CONFIG_SUFFIX,
+    KIND_FLUSS_CLUSTER, LABEL_CLUSTER, LABEL_ROLE, ROLE_COORDINATOR, ROLE_TABLET,
+    TABLET_CONFIG_SUFFIX,
 };
-use crate::utils::render;
+use crate::utils::{hash, render};
 
 use super::server_config;
 
@@ -44,14 +45,6 @@ pub fn desired_coordinator_config(
         block_owner_deletion: Some(true),
     };
 
-    let object_meta = ObjectMeta {
-        name: Some(cm_name),
-        namespace,
-        labels: Some(labels),
-        owner_references: Some(vec![owner_ref]),
-        ..Default::default()
-    };
-
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
@@ -64,7 +57,20 @@ pub fn desired_coordinator_config(
     server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
 
     let server_yaml = render::to_yaml(&properties);
+    let config_hash = hash::sha256_hex(&server_yaml);
     let data = BTreeMap::from([(CONFIG_DATA_KEY.to_string(), server_yaml)]);
+
+    let object_meta = ObjectMeta {
+        name: Some(cm_name),
+        namespace,
+        labels: Some(labels),
+        annotations: Some(BTreeMap::from([(
+            CONFIG_HASH_ANNOTATION.to_string(),
+            config_hash,
+        )])),
+        owner_references: Some(vec![owner_ref]),
+        ..Default::default()
+    };
 
     Ok(ConfigMap {
         metadata: object_meta,
@@ -106,14 +112,6 @@ pub fn desired_tablet_config(
         block_owner_deletion: Some(true),
     };
 
-    let object_meta = ObjectMeta {
-        name: Some(cm_name),
-        namespace,
-        labels: Some(labels),
-        owner_references: Some(vec![owner_ref]),
-        ..Default::default()
-    };
-
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
@@ -130,7 +128,20 @@ pub fn desired_tablet_config(
     server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
 
     let server_yaml = render::to_yaml(&properties);
+    let config_hash = hash::sha256_hex(&server_yaml);
     let data = BTreeMap::from([(CONFIG_DATA_KEY.to_string(), server_yaml)]);
+
+    let object_meta = ObjectMeta {
+        name: Some(cm_name),
+        namespace,
+        labels: Some(labels),
+        annotations: Some(BTreeMap::from([(
+            CONFIG_HASH_ANNOTATION.to_string(),
+            config_hash,
+        )])),
+        owner_references: Some(vec![owner_ref]),
+        ..Default::default()
+    };
 
     Ok(ConfigMap {
         metadata: object_meta,
