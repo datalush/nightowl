@@ -353,6 +353,10 @@ pub enum S3DelegationSpec {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[schemars(extend("x-kubernetes-validations" = [{
+    "rule": "!has(self.minInSyncReplicas) || self.minInSyncReplicas <= self.logReplicationFactor",
+    "message": "minInSyncReplicas must not exceed logReplicationFactor"
+}]))]
 #[serde(rename_all = "camelCase")]
 pub struct TableDefaultsSpec {
     #[schemars(range(min = 1))]
@@ -360,7 +364,8 @@ pub struct TableDefaultsSpec {
     #[schemars(range(min = 1))]
     pub log_replication_factor: i32,
     #[schemars(range(min = 1))]
-    pub min_in_sync_replicas: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_in_sync_replicas: Option<i32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

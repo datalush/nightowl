@@ -53,6 +53,7 @@ pub fn desired_coordinator_config(cluster: &FlussCluster) -> ConfigMap {
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
+    properties.extend(server_config::table_defaults::properties(cluster));
 
     let server_yaml = render::to_yaml(&properties);
     let data = BTreeMap::from([(CONFIG_DATA_KEY.to_string(), server_yaml)]);
@@ -106,6 +107,7 @@ pub fn desired_tablet_config(cluster: &FlussCluster) -> ConfigMap {
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
+    properties.extend(server_config::table_defaults::properties(cluster));
     properties.insert(
         "data.dir".to_string(),
         server_config::storage::data_dir(cluster),

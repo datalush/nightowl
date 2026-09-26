@@ -5,4 +5,5 @@
 
 pub mod listeners;
 pub mod storage;
+pub mod table_defaults;
 pub mod zookeeper;
