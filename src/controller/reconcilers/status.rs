@@ -19,7 +19,7 @@ use kube::Api;
 use kube::api::PostParams;
 
 use super::Observation;
-use crate::api::{FlussCluster, FlussClusterCondition, FlussClusterStatus, FlussConditionType};
+use crate::api::{FlussCluster, FlussClusterStatus, FlussConditionType};
 use crate::controller::Error;
 
 /// Render the desired status from observations and write it if it changed.
@@ -54,34 +54,25 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
         fluss::fields(cluster, observations);
 
     let mut conditions = vec![
-        FlussClusterCondition {
-            condition_type: FlussConditionType::KubernetesResourcesReady,
-            status: condition_status.clone(),
-            reason: reason.clone(),
+        common::condition(
+            cluster,
+            FlussConditionType::KubernetesResourcesReady,
+            condition_status,
+            reason,
             message,
             evidence,
-            last_transition_time: common::transition_time(
-                cluster,
-                &FlussConditionType::KubernetesResourcesReady,
-                &condition_status,
-                &reason,
-            ),
-        },
-        FlussClusterCondition {
-            condition_type: FlussConditionType::RemoteStorageReady,
-            status: storage_status.clone(),
-            reason: storage_reason.clone(),
-            message: storage_message,
-            evidence: storage_evidence,
-            last_transition_time: common::transition_time(
-                cluster,
-                &FlussConditionType::RemoteStorageReady,
-                &storage_status,
-                &storage_reason,
-            ),
-        },
+        ),
+        common::condition(
+            cluster,
+            FlussConditionType::RemoteStorageReady,
+            storage_status,
+            storage_reason,
+            storage_message,
+            storage_evidence,
+        ),
     ];
     conditions.extend(fluss::conditions(cluster, observations));
+    conditions.extend(storage::secret_condition(cluster, observations));
 
     FlussClusterStatus {
         observed_generation: cluster.metadata.generation,

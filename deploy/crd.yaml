@@ -3686,6 +3686,7 @@ spec:
                       - RemoteStorageReady
                       - FlussReachable
                       - ClusterHealthy
+                      - S3CredentialsStale
                       - OperationBlocked
                       type: string
                   required:

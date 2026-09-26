@@ -1,7 +1,8 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::core::v1::{ConfigMap, Service};
+use k8s_openapi::api::core::v1::{ConfigMap, Secret, Service};
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use kube::Api;
 use kube::runtime::controller::Action;
@@ -30,6 +31,7 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     let services: Api<Service> = Api::namespaced(ctx.client.clone(), &namespace);
     let configmaps: Api<ConfigMap> = Api::namespaced(ctx.client.clone(), &namespace);
     let statefulsets: Api<StatefulSet> = Api::namespaced(ctx.client.clone(), &namespace);
+    let secrets: Api<Secret> = Api::namespaced(ctx.client.clone(), &namespace);
     let pdbs: Api<PodDisruptionBudget> = Api::namespaced(ctx.client.clone(), &namespace);
     let clusters: Api<FlussCluster> = Api::namespaced(ctx.client.clone(), &namespace);
 
@@ -50,8 +52,9 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     observations.extend(guardrails::storage::check(&ctx.client, &namespace, &cluster).await?);
     let workloads_blocked = observations.iter().any(|o| o.blocked_guardrail().is_some());
     if !workloads_blocked {
-        observations
-            .extend(reconcilers::statefulset::reconcile(&statefulsets, &cluster, &uid).await?);
+        observations.extend(
+            reconcilers::statefulset::reconcile(&statefulsets, &secrets, &cluster, &uid).await?,
+        );
         observations
             .extend(reconcilers::pod_disruption_budget::reconcile(&pdbs, &cluster, &uid).await?);
     }
@@ -88,5 +91,9 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     if let Some(message) = observations.iter().find_map(Observation::blocked_guardrail) {
         return Err(Error::InvalidConfig(message.to_string()));
     }
-    Ok(Action::await_change())
+    // Periodic resync: Secret rotation changes no watched object, so without
+    // a heartbeat the staleness detector would sleep until the next
+    // unrelated event. Steady state is write-free, so the cost is a few
+    // reads per minute per cluster.
+    Ok(Action::requeue(Duration::from_secs(60)))
 }

@@ -12,6 +12,7 @@
 //! coordinator that never readies blocks tablets instead of wedging them.
 
 use k8s_openapi::api::apps::v1::StatefulSet;
+use k8s_openapi::api::core::v1::{Container, PodSpec, PodTemplateSpec, Secret, Volume};
 use kube::Api;
 
 use super::Observation;
@@ -26,14 +27,37 @@ use crate::resources::statefulset as builder;
 /// Tablets wait for coordinator readiness (see module docs); the wait is
 /// reported, not hidden, and never an error.
 pub async fn reconcile(
-    api: &Api<StatefulSet>,
+    statefulsets: &Api<StatefulSet>,
+    secrets: &Api<Secret>,
     cluster: &FlussCluster,
     uid: &str,
 ) -> Result<Vec<Observation>, Error> {
-    let mut observations = Vec::with_capacity(2);
-    observations.push(converge_one(api, cluster, uid, Role::Coordinator).await?);
-    if coordinator_ready(api, cluster).await? {
-        observations.push(converge_one(api, cluster, uid, Role::Tablet).await?);
+    // Pinned into fresh pod templates below; compared against the pins
+    // afterwards for rotation detection. `None` under workload identity or
+    // when the Secret cannot be read (the storage guardrail reports that).
+    let live_hash = live_secret_hash(secrets, cluster).await?;
+    let mut observations = Vec::with_capacity(4);
+    observations.push(
+        converge_one(
+            statefulsets,
+            cluster,
+            uid,
+            Role::Coordinator,
+            live_hash.as_deref(),
+        )
+        .await?,
+    );
+    if coordinator_ready(statefulsets, cluster).await? {
+        observations.push(
+            converge_one(
+                statefulsets,
+                cluster,
+                uid,
+                Role::Tablet,
+                live_hash.as_deref(),
+            )
+            .await?,
+        );
     } else {
         let name = format!(
             "{}{}",
@@ -43,6 +67,7 @@ pub async fn reconcile(
         tracing::info!(statefulset = %name, "waiting for a ready coordinator replica");
         observations.push(Observation::WaitingForCoordinator { name });
     }
+    observations.extend(detect_stale(statefulsets, cluster, live_hash.as_deref()).await?);
     Ok(observations)
 }
 
@@ -70,6 +95,116 @@ async fn coordinator_ready(api: &Api<StatefulSet>, cluster: &FlussCluster) -> Re
     }
 }
 
+/// Hash of the live S3 Secret content, or `None` when there is nothing to
+/// pin: workload identity uses no secret, and a missing or key-incomplete
+/// secret is already reported by the storage guardrail.
+///
+/// Only the referenced keys participate, so unrelated keys in the same
+/// Secret never read as rotation.
+async fn live_secret_hash(
+    secrets: &Api<Secret>,
+    cluster: &FlussCluster,
+) -> Result<Option<String>, Error> {
+    use crate::api::S3AuthenticationSpec;
+    use crate::utils::hash;
+
+    let secret_ref = match &cluster.spec.remote_storage.s3.authentication {
+        S3AuthenticationSpec::Secret { secret_ref } => secret_ref,
+        S3AuthenticationSpec::WorkloadIdentity { .. } => return Ok(None),
+    };
+    let secret = match secrets.get(&secret_ref.name).await {
+        Ok(secret) => secret,
+        Err(kube::Error::Api(status)) if status.code == 404 => return Ok(None),
+        Err(e) => return Err(Error::Kube(e)),
+    };
+    let data: std::collections::BTreeMap<String, Vec<u8>> = secret
+        .data
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, value)| (key, value.0))
+        .collect();
+    Ok(hash::secret_data_hash(
+        &data,
+        &[
+            secret_ref.access_key_key.clone(),
+            secret_ref.secret_key_key.clone(),
+        ],
+    ))
+}
+
+/// Compare the live Secret hash against what each StatefulSet's pods
+/// mounted (pinned in their template at render time).
+///
+/// Emits at most one observation per role: `SecretStale` naming the
+/// affected pod ordinals and the stale mount when both hashes exist and
+/// differ, `SecretFresh` when they agree or when no secret auth exists to
+/// go stale. Unreadable secrets emit nothing — absence is honest, and the
+/// storage guardrail already covers missing secrets.
+/// Detection only: never an error, never a rollout.
+async fn detect_stale(
+    statefulsets: &Api<StatefulSet>,
+    cluster: &FlussCluster,
+    live_hash: Option<&str>,
+) -> Result<Vec<Observation>, Error> {
+    use crate::api::S3AuthenticationSpec;
+    use crate::constants::{S3_SECRETS_DIR, SECRET_HASH_ANNOTATION};
+
+    if !matches!(
+        cluster.spec.remote_storage.s3.authentication,
+        S3AuthenticationSpec::Secret { .. }
+    ) {
+        return Ok(vec![Observation::SecretFresh {
+            message: "no secret authentication configured; nothing to go stale".to_string(),
+        }]);
+    }
+    let Some(live_hash) = live_hash else {
+        return Ok(Vec::new());
+    };
+    let mut observations = Vec::new();
+    let mut fresh = true;
+    for role in [Role::Coordinator, Role::Tablet] {
+        let name = format!(
+            "{}{}",
+            cluster.metadata.name.clone().ok_or(Error::MissingName)?,
+            role.suffix()
+        );
+        let live = match statefulsets.get(&name).await {
+            Ok(live) => live,
+            Err(kube::Error::Api(status)) if status.code == 404 => continue,
+            Err(e) => return Err(Error::Kube(e)),
+        };
+        let pinned = live
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.template.metadata.as_ref())
+            .and_then(|meta| meta.annotations.as_ref())
+            .and_then(|annotations| annotations.get(SECRET_HASH_ANNOTATION));
+        match pinned {
+            Some(pinned) if pinned != live_hash => {
+                fresh = false;
+                let replicas = live
+                    .spec
+                    .as_ref()
+                    .and_then(|spec| spec.replicas)
+                    .unwrap_or_else(|| role.replicas(cluster));
+                observations.push(Observation::SecretStale {
+                    pods: role.pod_names(cluster, replicas),
+                    message: format!(
+                        "statefulset {name} pods mount a rotated secret; live content differs from the pinned {live_hash} (stale mount: {S3_SECRETS_DIR})"
+                    ),
+                });
+            }
+            _ => {}
+        }
+    }
+    if fresh {
+        observations.push(Observation::SecretFresh {
+            message: "mounted secret content matches the live secret".to_string(),
+        });
+    }
+    Ok(observations)
+}
+
 #[derive(Clone, Copy)]
 enum Role {
     Coordinator,
@@ -87,10 +222,29 @@ impl Role {
     fn build(
         self,
         cluster: &FlussCluster,
+        secret_hash: Option<&str>,
     ) -> Result<StatefulSet, crate::resources::server_config::ConfigError> {
         match self {
-            Role::Coordinator => builder::desired_coordinator_statefulset(cluster),
-            Role::Tablet => builder::desired_tablet_statefulset(cluster),
+            Role::Coordinator => builder::desired_coordinator_statefulset(cluster, secret_hash),
+            Role::Tablet => builder::desired_tablet_statefulset(cluster, secret_hash),
+        }
+    }
+
+    /// Ordinal pod names owned by this role's StatefulSet. Computed, never
+    /// listed: no extra RBAC, and the names are stable by construction.
+    fn pod_names(self, cluster: &FlussCluster, replicas: i32) -> Vec<String> {
+        let base = format!(
+            "{}{}",
+            cluster.metadata.name.clone().unwrap_or_default(),
+            self.suffix()
+        );
+        (0..replicas).map(|i| format!("{base}-{i}")).collect()
+    }
+
+    fn replicas(self, cluster: &FlussCluster) -> i32 {
+        match self {
+            Role::Coordinator => cluster.spec.coordinator.replicas,
+            Role::Tablet => cluster.spec.tablet_servers.replicas,
         }
     }
 }
@@ -100,13 +254,14 @@ async fn converge_one(
     cluster: &FlussCluster,
     uid: &str,
     role: Role,
+    secret_hash: Option<&str>,
 ) -> Result<Observation, Error> {
     let name = format!(
         "{}{}",
         cluster.metadata.name.clone().ok_or(Error::MissingName)?,
         role.suffix()
     );
-    let desired = match role.build(cluster) {
+    let desired = match role.build(cluster, secret_hash) {
         Ok(desired) => desired,
         Err(e) => {
             return Ok(Observation::StatefulSetBlocked {
@@ -129,16 +284,332 @@ async fn converge_one(
 
 /// StatefulSets are the same when the fields the controller manages agree.
 ///
-/// Only replicas, selector, pod template and claim templates participate:
-/// server-defaulted fields such as `updateStrategy`, `revisionHistoryLimit`
-/// or `podManagementPolicy` must never read as drift, or every read-back
-/// would trigger a replace loop.
+/// Pod templates compare recursively on managed fields only: the apiserver
+/// defaults a long tail inside the template (volume `defaultMode`,
+/// container termination message paths, pod `dnsPolicy`/`restartPolicy`,
+/// the `default` service account and friends) that must never read as
+/// drift, or every trigger rewrites the object.
 fn same_statefulset(a: &StatefulSet, b: &StatefulSet) -> bool {
     let (Some(a_spec), Some(b_spec)) = (a.spec.as_ref(), b.spec.as_ref()) else {
         return a.spec.is_none() && b.spec.is_none();
     };
     a_spec.replicas == b_spec.replicas
         && a_spec.selector == b_spec.selector
-        && a_spec.template == b_spec.template
-        && a_spec.volume_claim_templates == b_spec.volume_claim_templates
+        && same_template(&a_spec.template, &b_spec.template)
+        && same_claims(
+            a_spec.volume_claim_templates.as_deref(),
+            b_spec.volume_claim_templates.as_deref(),
+        )
+}
+
+/// Claim templates compare without `status`: the apiserver injects
+/// `status.phase` into the stored templates, which must never read as
+/// drift (verified live — this exact mismatch rewrote StatefulSets).
+fn same_claims(
+    a: Option<&[k8s_openapi::api::core::v1::PersistentVolumeClaim]>,
+    b: Option<&[k8s_openapi::api::core::v1::PersistentVolumeClaim]>,
+) -> bool {
+    fn key(
+        claims: &[k8s_openapi::api::core::v1::PersistentVolumeClaim],
+    ) -> Vec<(
+        k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+        Option<k8s_openapi::api::core::v1::PersistentVolumeClaimSpec>,
+    )> {
+        claims
+            .iter()
+            .map(|claim| (claim.metadata.clone(), claim.spec.clone()))
+            .collect()
+    }
+    key(a.unwrap_or_default()) == key(b.unwrap_or_default())
+}
+
+/// Template metadata is managed except the secret pin: labels plus our
+/// annotations compare, but the secret hash is detection-only by design —
+/// comparing it would roll pods on rotation, and restart policy is a
+/// separate decision (j5v3).
+fn same_template(a: &PodTemplateSpec, b: &PodTemplateSpec) -> bool {
+    a.metadata.as_ref().map(metadata_key) == b.metadata.as_ref().map(metadata_key)
+        && same_pod_spec(a.spec.as_ref(), b.spec.as_ref())
+}
+
+fn metadata_key(
+    meta: &k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
+) -> (
+    Option<std::collections::BTreeMap<String, String>>,
+    std::collections::BTreeMap<String, String>,
+) {
+    let mut annotations = meta.annotations.clone().unwrap_or_default();
+    annotations.remove(crate::constants::SECRET_HASH_ANNOTATION);
+    (meta.labels.clone(), annotations)
+}
+
+/// PodSpec fields the controller sets. Deliberately absent: `dnsPolicy`,
+/// `restartPolicy`, `schedulerName`, `terminationGracePeriodSeconds`,
+/// `serviceAccountName`, `enableServiceLinks` and every other server
+/// default — comparing them would mistake every read-back for drift.
+///
+/// `securityContext` compares normalized: the apiserver persists an empty
+/// object where the builder renders nothing, and `None` vs `{}` must read
+/// as the same absence.
+fn same_pod_spec(a: Option<&PodSpec>, b: Option<&PodSpec>) -> bool {
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            same_containers(&a.containers, &b.containers)
+                && same_volumes(a.volumes.as_deref(), b.volumes.as_deref())
+                && same_security_context(a.security_context.as_ref(), b.security_context.as_ref())
+                && a.image_pull_secrets == b.image_pull_secrets
+                && a.node_selector == b.node_selector
+                && a.affinity == b.affinity
+                && a.tolerations == b.tolerations
+                && a.topology_spread_constraints == b.topology_spread_constraints
+        }
+        _ => false,
+    }
+}
+
+fn same_security_context(
+    a: Option<&k8s_openapi::api::core::v1::PodSecurityContext>,
+    b: Option<&k8s_openapi::api::core::v1::PodSecurityContext>,
+) -> bool {
+    fn effective(
+        value: Option<&k8s_openapi::api::core::v1::PodSecurityContext>,
+    ) -> Option<&k8s_openapi::api::core::v1::PodSecurityContext> {
+        // `..Default::default()` needs the full struct literal; compare
+        // against a normalized empty instead: absent and empty are the
+        // same "no pod security constraints" the builder intends.
+        match value {
+            None => None,
+            Some(context)
+                if context
+                    == &k8s_openapi::api::core::v1::PodSecurityContext {
+                        ..Default::default()
+                    } =>
+            {
+                None
+            }
+            Some(context) => Some(context),
+        }
+    }
+    effective(a) == effective(b)
+}
+
+/// Containers agree on what the builder sets. Excluded: `terminationMessagePath`
+/// and `terminationMessagePolicy` (always defaulted), plus anything else the
+/// builder leaves unset. Probes, env, resources, mounts and ports are fully
+/// specified by the builder, so whole-struct equality is exact there.
+fn same_containers(a: &[Container], b: &[Container]) -> bool {
+    a.len() == b.len()
+        && a.iter().zip(b.iter()).all(|(a, b)| {
+            a.name == b.name
+                && a.image == b.image
+                && a.image_pull_policy == b.image_pull_policy
+                && a.command == b.command
+                && a.args == b.args
+                && a.env == b.env
+                && same_container_ports(a, b)
+                && a.resources == b.resources
+                && a.volume_mounts == b.volume_mounts
+                && a.liveness_probe == b.liveness_probe
+                && a.readiness_probe == b.readiness_probe
+                && a.startup_probe == b.startup_probe
+        })
+}
+
+/// Container ports agree on name, port and protocol. `hostPort`/`hostIP`
+/// are never set; `containerPort` is informational alongside them.
+fn same_container_ports(a: &Container, b: &Container) -> bool {
+    let key = |container: &Container| {
+        container
+            .ports
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|port| (port.name, port.container_port, port.protocol))
+            .collect::<Vec<_>>()
+    };
+    key(a) == key(b)
+}
+
+/// Volumes agree on name plus the managed source fields. Excluded:
+/// `defaultMode` on config-map and secret sources (always defaulted to
+/// 420), and every source type the builder never renders.
+fn same_volumes(a: Option<&[Volume]>, b: Option<&[Volume]>) -> bool {
+    let key = |volumes: &[Volume]| {
+        volumes
+            .iter()
+            .map(|volume| {
+                (
+                    volume.name.clone(),
+                    volume
+                        .config_map
+                        .as_ref()
+                        .map(|source| (source.name.clone(), source.items.clone(), source.optional)),
+                    volume.secret.as_ref().map(|source| {
+                        (
+                            source.secret_name.clone(),
+                            source.items.clone(),
+                            source.optional,
+                        )
+                    }),
+                    volume.empty_dir.is_some(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    key(a.unwrap_or_default()) == key(b.unwrap_or_default())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::same_statefulset;
+
+    fn spike_cluster() -> crate::api::FlussCluster {
+        let mut cluster: crate::api::FlussCluster =
+            serde_yaml::from_str(include_str!("../../../../lab2/demo.yml"))
+                .expect("lab2 demo CR must deserialize");
+        cluster.metadata.uid = Some("test-uid".to_string());
+        cluster
+    }
+
+    /// The apiserver fills defaults on write; a read-back carrying them
+    /// must still compare equal, or every trigger rewrites the object.
+    fn server_defaulted(
+        mut sts: k8s_openapi::api::apps::v1::StatefulSet,
+    ) -> k8s_openapi::api::apps::v1::StatefulSet {
+        let template = sts
+            .spec
+            .as_mut()
+            .expect("statefulset needs a spec")
+            .template
+            .clone();
+        let mut template = template;
+        let pod = template.spec.as_mut().expect("pod template needs a spec");
+        pod.dns_policy = Some("ClusterFirst".to_string());
+        pod.restart_policy = Some("Always".to_string());
+        pod.scheduler_name = Some("default-scheduler".to_string());
+        pod.service_account_name = Some("default".to_string());
+        pod.termination_grace_period_seconds = Some(30);
+        for volume in pod.volumes.as_mut().expect("pod needs volumes") {
+            if let Some(source) = volume.config_map.as_mut() {
+                source.default_mode = Some(420);
+            }
+            if let Some(source) = volume.secret.as_mut() {
+                source.default_mode = Some(420);
+            }
+        }
+        for container in &mut pod.containers {
+            container.termination_message_path = Some("/dev/termination-log".to_string());
+            container.termination_message_policy = Some("File".to_string());
+            for env in container.env.as_mut().expect("container needs env") {
+                if let Some(selector) = env
+                    .value_from
+                    .as_mut()
+                    .and_then(|source| source.field_ref.as_mut())
+                {
+                    // The apiserver defaults fieldRef.apiVersion to v1;
+                    // verified live (this exact absence rewrote
+                    // StatefulSets on every trigger).
+                    selector.api_version = Some("v1".to_string());
+                }
+            }
+            for probe in [
+                &mut container.liveness_probe,
+                &mut container.readiness_probe,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                // The apiserver defaults successThreshold to 1.
+                probe.success_threshold = Some(1);
+            }
+        }
+        // The apiserver persists an empty object where the builder renders
+        // nothing; verified live (this exact mismatch rewrote StatefulSets
+        // on every trigger before the normalization).
+        pod.security_context = Some(Default::default());
+        sts.spec
+            .as_mut()
+            .expect("statefulset needs a spec")
+            .template = template;
+        // The apiserver injects claim status into stored templates; verified
+        // live (this exact mismatch rewrote StatefulSets on every trigger).
+        if let Some(claims) = sts
+            .spec
+            .as_mut()
+            .expect("statefulset needs a spec")
+            .volume_claim_templates
+            .as_mut()
+        {
+            for claim in claims {
+                claim.status = Some(Default::default());
+            }
+        }
+        sts
+    }
+
+    #[test]
+    fn server_defaults_do_not_read_as_drift() {
+        let cluster = spike_cluster();
+        for desired in [
+            crate::resources::statefulset::desired_coordinator_statefulset(&cluster, None)
+                .expect("valid CR must render"),
+            crate::resources::statefulset::desired_tablet_statefulset(&cluster, None)
+                .expect("valid CR must render"),
+        ] {
+            let live = server_defaulted(desired.clone());
+            assert!(
+                same_statefulset(&desired, &live),
+                "server defaults must not read as drift"
+            );
+        }
+    }
+
+    #[test]
+    fn real_changes_still_count() {
+        let cluster = spike_cluster();
+        let desired = crate::resources::statefulset::desired_tablet_statefulset(&cluster, None)
+            .expect("valid CR must render");
+        let mut live = server_defaulted(desired.clone());
+        live.spec
+            .as_mut()
+            .expect("statefulset needs a spec")
+            .replicas = Some(99);
+        assert!(
+            !same_statefulset(&desired, &live),
+            "replica change must read as drift"
+        );
+        let mut live = server_defaulted(desired.clone());
+        live.spec
+            .as_mut()
+            .expect("statefulset needs a spec")
+            .template
+            .spec
+            .as_mut()
+            .expect("pod template needs a spec")
+            .containers[0]
+            .image = Some("other:tag".to_string());
+        assert!(
+            !same_statefulset(&desired, &live),
+            "image change must read as drift"
+        );
+    }
+
+    #[test]
+    fn secret_pin_rotation_is_not_drift() {
+        // Rotation must report, never roll: the pin is detection-only, so a
+        // changed pin alone must compare equal and leave rollout policy to
+        // j5v3.
+        let cluster = spike_cluster();
+        let desired =
+            crate::resources::statefulset::desired_tablet_statefulset(&cluster, Some("sha256:old"))
+                .expect("valid CR must render");
+        let rotated =
+            crate::resources::statefulset::desired_tablet_statefulset(&cluster, Some("sha256:new"))
+                .expect("valid CR must render");
+        assert!(
+            same_statefulset(&desired, &rotated),
+            "pin-only change must not read as drift"
+        );
+    }
 }

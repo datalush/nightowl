@@ -63,7 +63,7 @@ Siguen ausentes hasta que exista la API Admin de lectura por servidor: `coordina
 | `tabletServers` | objeto opcional | Réplicas deseadas/listas y, por pod, `assignedTablets` y `replicaHealth` opcionales. |
 | `conditions` | lista | Indicadores operativos independientes con evidencia y momento de transición. |
 
-Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. El esquema limita `status` a `"True"`, `"False"` y `"Unknown"`, y `type` a `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy` y `OperationBlocked`. Hoy corren `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable` y `ClusterHealthy`; el resto están planificadas.
+Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. El esquema limita `status` a `"True"`, `"False"` y `"Unknown"`, y `type` a `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` y `OperationBlocked`. Hoy corren `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy` y `S3CredentialsStale`; el resto están planificadas.
 
 `getClusterHealth()` de Fluss 1.0 proporciona contadores globales. `assignedTablets` y `replicaHealth` por pod requieren la API Admin de lectura por servidor propuesta por FIP-41: deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
 

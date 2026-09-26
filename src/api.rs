@@ -481,6 +481,7 @@ pub enum FlussConditionType {
     RemoteStorageReady,
     FlussReachable,
     ClusterHealthy,
+    S3CredentialsStale,
     OperationBlocked,
 }
 

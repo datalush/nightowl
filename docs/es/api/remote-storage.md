@@ -57,7 +57,7 @@ s3.access-key: ${directory:/etc/fluss/secrets/s3:access-key}
 s3.secret-key: ${directory:/etc/fluss/secrets/s3:secret-key}
 ```
 
-Fluss resuelve los marcadores al arrancar, por lo que rotar el Secret exige reiniciar los servidores afectados. El montaje está implementado (verificado en vivo contra RustFS); la semántica de reinicio tras rotación se sigue por separado.
+Fluss resuelve los marcadores al arrancar, por lo que rotar el Secret exige reiniciar los servidores afectados. El montaje está implementado (verificado en vivo contra RustFS). La rotación se detecta, no se cura: los pods fijan el hash del Secret en su plantilla, y si difiere del Secret vivo aparece `S3CredentialsStale=True` nombrando los pods afectados y el montaje stale — sin reiniciar nada. La política de reinicio va por separado.
 
 ## La delegación es otro requisito de compatibilidad
 

@@ -65,6 +65,13 @@ pub enum Observation {
     ConfigHash {
         value: String,
     },
+    SecretFresh {
+        message: String,
+    },
+    SecretStale {
+        pods: Vec<String>,
+        message: String,
+    },
     StorageReady {
         evidence: Vec<String>,
     },

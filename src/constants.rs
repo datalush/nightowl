@@ -105,3 +105,11 @@ pub const S3_SECRETS_DIR: &str = "/etc/fluss/secrets/s3";
 /// File names inside [`S3_SECRETS_DIR`] holding the static credentials.
 pub const S3_ACCESS_KEY_FILE: &str = "access-key";
 pub const S3_SECRET_KEY_FILE: &str = "secret-key";
+
+/// Annotation on pod templates pinning the `sha256:<hex>` hash of the
+/// mounted S3 Secret content at render time.
+///
+/// Detection only: the StatefulSet comparator deliberately ignores it, so
+/// rotation surfaces as a `S3CredentialsStale` condition instead of an
+/// automatic rollout (restart policy belongs to j5v3).
+pub const SECRET_HASH_ANNOTATION: &str = "fluss.datalush.com/secret-hash";
