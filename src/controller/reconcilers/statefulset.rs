@@ -270,6 +270,32 @@ async fn converge_one(
             });
         }
     };
+    // Fail-closed scale-in: the only policy is Block, and emptiness is not
+    // observable until the per-server read API exists (erbh). A decrement
+    // therefore never converges — it reports instead. Scale-out flows
+    // through untouched.
+    if matches!(role, Role::Tablet) {
+        let wanted = desired
+            .spec
+            .as_ref()
+            .and_then(|spec| spec.replicas)
+            .unwrap_or(0);
+        let live_replicas = match api.get(&name).await {
+            Ok(live) => live.spec.as_ref().and_then(|spec| spec.replicas),
+            Err(kube::Error::Api(status)) if status.code == 404 => None,
+            Err(e) => return Err(Error::Kube(e)),
+        };
+        if let Some(live_replicas) = live_replicas
+            && wanted < live_replicas
+        {
+            return Ok(Observation::StatefulSetBlocked {
+                name: name.clone(),
+                message: format!(
+                    "refusing to scale tabletservers from {live_replicas} down to {wanted}: scale-in policy is Block and hosted replicas are not observable yet"
+                ),
+            });
+        }
+    }
     match apply::apply(api, desired, uid, same_statefulset).await {
         Ok(outcome) => Ok(Observation::StatefulSetConverged { name, outcome }),
         Err(Error::NotOwned(_)) => Ok(Observation::StatefulSetBlocked {
