@@ -369,7 +369,7 @@ pub struct ObservabilitySpec {
     pub prometheus: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FlussClusterStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -390,7 +390,7 @@ pub struct FlussClusterStatus {
     pub conditions: Vec<FlussClusterCondition>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CoordinatorStatus {
     pub desired: i32,
@@ -399,7 +399,7 @@ pub struct CoordinatorStatus {
     pub active_pod: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct TabletServersStatus {
     pub desired: i32,
     pub ready: i32,
@@ -407,7 +407,7 @@ pub struct TabletServersStatus {
     pub pods: Vec<TabletServerPodStatus>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TabletServerPodStatus {
     pub name: String,
@@ -419,14 +419,14 @@ pub struct TabletServerPodStatus {
     pub replica_health: Option<ReplicaHealth>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct ClusterHealthStatus {
     pub status: ClusterHealthState,
     #[serde(flatten)]
     pub replicas: ReplicaHealth,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplicaHealth {
     pub num_replicas: i32,
@@ -435,7 +435,7 @@ pub struct ReplicaHealth {
     pub active_leader_replicas: i32,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ClusterHealthState {
     Green,
@@ -444,7 +444,7 @@ pub enum ClusterHealthState {
     Unknown,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FlussClusterCondition {
     #[serde(rename = "type")]
@@ -457,7 +457,7 @@ pub struct FlussClusterCondition {
     pub last_transition_time: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub enum FlussConditionType {
     Ready,
     Progressing,
@@ -473,7 +473,7 @@ pub enum FlussConditionType {
     OperationBlocked,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub enum ConditionStatus {
     True,
     False,
