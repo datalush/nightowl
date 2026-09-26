@@ -1,0 +1,50 @@
+apiVersion: fluss.datalush.com/v1alpha1
+kind: FlussCluster
+metadata:
+  name: minio-lab
+  namespace: data
+spec:
+  version: "1.0.0"
+  image:
+    repository: apache/fluss
+    pullPolicy: IfNotPresent
+  zookeeper:
+    addresses:
+      - zk-zookeeper.fluss.svc.cluster.local:2181
+    pathRoot: /fluss/data/minio-lab
+  coordinator:
+    replicas: 1
+    resources:
+      requests: { cpu: "500m", memory: "1Gi" }
+    jvm:
+      heap: 512Mi
+  tabletServers:
+    replicas: 3
+    resources:
+      requests: { cpu: "1", memory: "2Gi" }
+    jvm:
+      heap: 1Gi
+    storage:
+      size: 5Gi
+    scheduling:
+      spreadAcrossNodes: true
+  listeners:
+    internal: { name: INTERNAL, port: 9123 }
+    client: { name: CLIENT, port: 9124, serviceType: ClusterIP }
+  podDisruptionBudget:
+    tabletServers: { enabled: true, maxUnavailable: 0 }
+  scaleIn:
+    onNonEmptyTabletServer: Block
+  remoteStorage:
+    s3:
+      bucket: fluss
+      prefix: clusters/data/minio-lab
+      region: us-east-1
+      endpoint: http://minio.storage.svc.cluster.local:9000
+      pathStyleAccess: true
+      authentication:
+        type: secret
+        secretRef:
+          name: fluss-minio
+          accessKeyKey: access-key
+          secretKeyKey: secret-key

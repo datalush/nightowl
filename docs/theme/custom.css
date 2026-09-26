@@ -1,0 +1,341 @@
+/* A quiet technical palette in both built-in light and coal modes. */
+.light {
+  --bg: #faf9f6;
+  --fg: #242528;
+  --sidebar-bg: #f2f1ed;
+  --sidebar-fg: #38393b;
+  --sidebar-non-existant: #747578;
+  --sidebar-active: #181a1d;
+  --sidebar-header-border-color: #a19f97;
+  --scrollbar: #cfcec8;
+  --icons: #55575a;
+  --icons-hover: #17191b;
+  --links: #3d4044;
+  --inline-code-color: #35373b;
+  --theme-hover: #e7e6e1;
+  --quote-bg: #f0efeb;
+  --quote-border: #a19f97;
+  --table-border-color: #dddbd4;
+  --table-header-bg: #eeede8;
+  --table-alternate-bg: #f5f4f0;
+  --doc-border: #dedcd5;
+  --doc-muted: #67696d;
+  --doc-surface: #fffefa;
+  --doc-code: #f0efeb;
+  --code-key: #455675;
+  --code-value: #865439;
+  --code-literal: #6e5081;
+  --doc-shadow: 0 18px 48px -32px rgb(23 24 25 / 23%);
+}
+
+.coal {
+  --bg: #17191c;
+  --fg: #e8e7e3;
+  --sidebar-bg: #1e2023;
+  --sidebar-fg: #c5c4bf;
+  --sidebar-non-existant: #898b8e;
+  --sidebar-active: #fffefa;
+  --sidebar-header-border-color: #777a7d;
+  --scrollbar: #424448;
+  --icons: #bbbcbf;
+  --icons-hover: #fffefa;
+  --links: #deddd6;
+  --inline-code-color: #e7e6df;
+  --theme-hover: #303237;
+  --quote-bg: #242629;
+  --quote-border: #93918b;
+  --table-border-color: #373a3e;
+  --table-header-bg: #292b2e;
+  --table-alternate-bg: #202225;
+  --doc-border: #383b3f;
+  --doc-muted: #adafaa;
+  --doc-surface: #202225;
+  --doc-code: #222427;
+  --code-key: #b4c4e5;
+  --code-value: #e2b68a;
+  --code-literal: #c8afe2;
+  --doc-shadow: 0 18px 48px -32px rgb(0 0 0 / 70%);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.content {
+  line-height: 1.75;
+}
+
+.content main {
+  max-width: 880px;
+}
+
+.content h1,
+.content h2,
+.content h3 {
+  letter-spacing: -0.035em;
+  line-height: 1.2;
+}
+
+.content h1 {
+  font-size: clamp(2.1rem, 4vw, 3rem);
+  margin-bottom: 0.85em;
+}
+
+.content h2 {
+  border-top: 1px solid var(--doc-border);
+  padding-top: 1.15em;
+  margin-top: 2.3em;
+}
+
+.content a {
+  text-decoration-color: var(--doc-muted);
+  text-underline-offset: 0.22em;
+  text-decoration-thickness: 1px;
+}
+
+.content a:hover {
+  text-decoration-color: currentColor;
+}
+
+.content code {
+  border-radius: 4px;
+}
+
+.content :not(pre) > code {
+  background: var(--doc-code);
+  padding: 0.14em 0.35em;
+}
+
+.content pre {
+  border: 1px solid var(--doc-border);
+  border-radius: 10px;
+  box-shadow: var(--doc-shadow);
+}
+
+/* Keep mdBook's YAML highlighting, using colors with good contrast in both modes. */
+:is(.light, .coal) .hljs {
+  background: var(--doc-code);
+  color: var(--fg);
+}
+
+:is(.light, .coal) .hljs-attr,
+:is(.light, .coal) .hljs-attribute,
+:is(.light, .coal) .hljs-keyword,
+:is(.light, .coal) .hljs-title {
+  color: var(--code-key);
+  font-weight: 600;
+}
+
+:is(.light, .coal) .hljs-string,
+:is(.light, .coal) .hljs-symbol,
+:is(.light, .coal) .hljs-bullet {
+  color: var(--code-value);
+}
+
+:is(.light, .coal) .hljs-number,
+:is(.light, .coal) .hljs-literal {
+  color: var(--code-literal);
+}
+
+:is(.light, .coal) .hljs-comment {
+  color: var(--doc-muted);
+}
+
+.content blockquote {
+  border-left: 3px solid var(--quote-border);
+  border-radius: 0 8px 8px 0;
+  padding: 0.5em 1.2em;
+  margin: 1.5em 0;
+}
+
+.content table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border-radius: 8px;
+  max-width: 100%;
+}
+
+.content th,
+.content td {
+  padding: 0.65em 0.85em;
+  vertical-align: top;
+}
+
+.sidebar .chapter {
+  padding-top: 0.8rem;
+}
+
+.sidebar .chapter li.chapter-item a {
+  border-radius: 6px;
+}
+
+.sidebar .chapter li.part-title {
+  margin: 2.4rem 0 0.8rem;
+  padding: 0;
+  border: 0;
+  letter-spacing: 0.04em;
+}
+
+.sidebar .chapter li.chapter-item {
+  margin-block-start: 0.35em;
+}
+
+.sidebar-resize-handle .sidebar-resize-indicator {
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.sidebar-resize-handle:hover .sidebar-resize-indicator {
+  opacity: 0.7;
+}
+
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  margin-right: 1.1rem;
+  padding: 0.3rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 6px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 1.2rem;
+}
+
+.language-switch a {
+  color: var(--doc-muted);
+  padding: 0.25rem 0.6rem;
+  text-decoration: none;
+  border-radius: 4px;
+}
+
+.language-switch a:hover,
+.language-switch a:focus-visible {
+  color: var(--fg);
+}
+
+.language-switch a[aria-current="page"] {
+  background: var(--theme-hover);
+  color: var(--fg);
+  font-weight: 700;
+}
+
+.cover {
+  position: relative;
+  overflow: hidden;
+  background: var(--doc-surface);
+  border: 1px solid var(--doc-border);
+  border-radius: 16px;
+  padding: clamp(2rem, 6vw, 4.5rem);
+  margin: 1.2rem 0 2.5rem;
+  box-shadow: var(--doc-shadow);
+}
+
+.cover > * {
+  position: relative;
+  z-index: 1;
+}
+
+.eyebrow,
+.card-index,
+.cover-meta {
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 1.15rem;
+  font-weight: 650;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--doc-muted);
+}
+
+.cover h1 {
+  font-size: clamp(2.8rem, 7vw, 5.2rem);
+  line-height: 1.04;
+  letter-spacing: -0.07em;
+  margin: 0.45em 0 0.34em;
+}
+
+.cover p {
+  font-size: 1.8rem;
+  max-width: 37rem;
+  color: var(--doc-muted);
+}
+
+.cover-meta {
+  display: block;
+  margin-top: 2.2rem;
+  letter-spacing: 0.03em;
+  text-transform: none;
+}
+
+.doc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.2rem;
+  margin: 1.8rem 0 2.4rem;
+}
+
+.content .doc-card {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 18rem;
+  padding: 1.8rem;
+  border: 1px solid var(--doc-border);
+  border-radius: 10px;
+  background: var(--doc-surface);
+  color: var(--fg);
+  text-decoration: none;
+  transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+}
+
+.content .doc-card:hover,
+.content .doc-card:focus-visible {
+  transform: translateY(-3px);
+  border-color: var(--doc-muted);
+  box-shadow: var(--doc-shadow);
+}
+
+.doc-card strong {
+  font-size: 1.8rem;
+  line-height: 1.25;
+  letter-spacing: -0.035em;
+}
+
+.doc-card > span:not(.card-index):not(.card-arrow) {
+  color: var(--doc-muted);
+  font-size: 1.45rem;
+  line-height: 1.5;
+}
+
+.card-arrow {
+  margin-top: auto;
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+@media (max-width: 800px) {
+  .doc-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content .doc-card {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 540px) {
+  #mdbook-menu-bar .menu-title,
+  #mdbook-menu-bar .right-buttons > a[title="Print this book"] {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .content .doc-card { transition: none; }
+}

@@ -1,0 +1,21 @@
+[book]
+title = "Fluss Operator"
+description = "An independent Kubernetes Operator for Apache Fluss"
+language = "en"
+src = "en"
+
+[build]
+build-dir = "../target/book/en"
+create-missing = false
+
+[output.html]
+theme = "theme"
+default-theme = "light"
+preferred-dark-theme = "coal"
+additional-css = ["theme/custom.css"]
+additional-js = ["theme/language.js"]
+no-section-label = true
+sidebar-header-nav = false
+
+[output.html.playground]
+runnable = false

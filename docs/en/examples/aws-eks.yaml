@@ -1,0 +1,76 @@
+apiVersion: fluss.datalush.com/v1alpha1
+kind: FlussCluster
+metadata:
+  name: production
+  namespace: data
+spec:
+  version: "1.0.0"
+  image:
+    repository: apache/fluss
+    pullPolicy: IfNotPresent
+  zookeeper:
+    addresses:
+      - zk-0.zk-headless.infrastructure.svc.cluster.local:2181
+      - zk-1.zk-headless.infrastructure.svc.cluster.local:2181
+      - zk-2.zk-headless.infrastructure.svc.cluster.local:2181
+    pathRoot: /fluss/data/production
+  coordinator:
+    replicas: 2
+    resources:
+      requests: { cpu: "500m", memory: "2Gi" }
+      limits: { cpu: "2", memory: "4Gi" }
+    jvm:
+      heap: 1Gi
+      extraArgs: ["-XX:+UseG1GC"]
+    scheduling:
+      spreadAcrossNodes: true
+    podTemplate:
+      annotations:
+        example.com/team: data
+    configurationOverrides:
+      coordinator.producer-offsets.ttl: "24h"
+  tabletServers:
+    replicas: 3
+    resources:
+      requests: { cpu: "1", memory: "4Gi" }
+      limits: { cpu: "4", memory: "8Gi" }
+    jvm:
+      heap: 4Gi
+      extraArgs: ["-XX:+UseG1GC"]
+    storage:
+      size: 20Gi
+      storageClassName: gp3
+      dataDir: /var/fluss/data
+    scheduling:
+      spreadAcrossNodes: true
+    configurationOverrides:
+      tablet-server.controlled-shutdown.max-retries: "5"
+  listeners:
+    internal: { name: INTERNAL, port: 9123 }
+    client: { name: CLIENT, port: 9124, serviceType: ClusterIP }
+  podDisruptionBudget:
+    tabletServers: { enabled: true, maxUnavailable: 0 }
+    coordinator: { enabled: true, minAvailable: 1 }
+  rollingUpgrade:
+    controlledShutdownTimeout: 5m
+    recoveryTimeout: 30m
+    stabilizationWindow: 30s
+  scaleIn:
+    onNonEmptyTabletServer: Block
+  remoteStorage:
+    s3:
+      bucket: company-fluss
+      prefix: clusters/data/production
+      region: eu-west-1
+      authentication:
+        type: workloadIdentity
+        serviceAccountName: fluss-production
+      delegation:
+        type: assumeRole
+        roleArn: arn:aws:iam::123456789012:role/fluss-clients-read
+  defaults:
+    buckets: 12
+    logReplicationFactor: 3
+    minInSyncReplicas: 2
+  observability:
+    prometheus: true
