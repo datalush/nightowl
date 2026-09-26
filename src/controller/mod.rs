@@ -48,12 +48,20 @@ pub enum Error {
 ///
 /// Static user errors (a conflicting owner, an invalid config) will not
 /// resolve themselves by retrying, so they wait for the next watch event
-/// instead of hot-looping. Transient API errors requeue with a fixed delay.
+/// instead of hot-looping. API rejections (the apiserver refusing an
+/// invalid or forbidden write) are static the same way. Only genuinely
+/// transient API errors requeue with a fixed delay.
 fn error_policy(cluster: Arc<FlussCluster>, error: &Error, _ctx: Arc<Context>) -> Action {
     let name = cluster.metadata.name.as_deref().unwrap_or("<no-name>");
     match error {
         Error::NotOwned(_) | Error::NotOwnedResource { .. } | Error::InvalidConfig(_) => {
             tracing::error!(cluster = %name, error = %error, "reconcile blocked");
+            Action::await_change()
+        }
+        Error::Kube(kube::Error::Api(status))
+            if matches!(status.code, 400 | 403 | 404 | 405 | 409 | 422) =>
+        {
+            tracing::error!(cluster = %name, error = %error, "reconcile rejected");
             Action::await_change()
         }
         _ => {
@@ -126,7 +134,7 @@ mod deploy_tests {
             serde_yaml::from_str(include_str!("../../deploy/clusterrole.yaml"))
                 .expect("clusterrole must parse");
         let rules = role.rules.expect("clusterrole needs rules");
-        assert_eq!(rules.len(), 6, "one rule per row of the verb matrix");
+        assert_eq!(rules.len(), 8, "one rule per row of the verb matrix");
 
         let mut remaining: Vec<(Vec<String>, Vec<String>, Vec<String>)> = rules
             .iter()
@@ -165,6 +173,16 @@ mod deploy_tests {
                 vec![
                     "create", "delete", "get", "list", "patch", "update", "watch",
                 ],
+            ),
+            (
+                vec![""],
+                vec!["persistentvolumeclaims"],
+                vec!["list", "patch"],
+            ),
+            (
+                vec!["storage.k8s.io"],
+                vec!["storageclasses"],
+                vec!["get", "list"],
             ),
             (vec![""], vec!["secrets", "serviceaccounts"], vec!["get"]),
         ] {

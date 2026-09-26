@@ -2,6 +2,12 @@
 # operator watches all namespaces; controller logic narrows to namespaces
 # holding FlussClusters and never adopts foreign objects).
 #
+# - persistentvolumeclaims: list the claims our templates created (by label)
+#   and patch their requested size on allowed growth. Never delete: retention
+#   is Retain and deletion belongs to the human.
+# - storageclasses: read the expansion policy (get a named class, list to
+#   find the cluster default). Never modified.
+#
 # Verb matrix (mirrored by a unit test — widen code and manifests together):
 # - flussclusters: read the CRs, write only .status (never spec).
 # - services, configmaps, statefulsets, poddisruptionbudgets: converge owned
@@ -30,6 +36,12 @@ rules:
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["list", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list"]
   - apiGroups: [""]
     resources: ["secrets", "serviceaccounts"]
     verbs: ["get"]

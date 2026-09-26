@@ -12,6 +12,7 @@ pub mod pod_disruption_budget;
 pub mod statefulset;
 pub mod status;
 pub mod tablet_service;
+pub mod volume;
 
 use super::apply::ApplyOutcome;
 use crate::api::ClusterHealthStatus;
@@ -72,6 +73,13 @@ pub enum Observation {
         pods: Vec<String>,
         message: String,
     },
+    VolumeBlocked {
+        name: String,
+        message: String,
+    },
+    PvcResized {
+        names: Vec<String>,
+    },
     StorageReady {
         evidence: Vec<String>,
     },
@@ -117,6 +125,14 @@ impl Observation {
     pub fn blocked_pdb(&self) -> Option<(&str, &str)> {
         match self {
             Observation::PdbBlocked { name, message } => Some((name, message)),
+            _ => None,
+        }
+    }
+
+    /// Name and message of a volume lifecycle block, if any.
+    pub fn blocked_volume(&self) -> Option<(&str, &str)> {
+        match self {
+            Observation::VolumeBlocked { name, message } => Some((name, message)),
             _ => None,
         }
     }

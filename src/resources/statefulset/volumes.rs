@@ -99,6 +99,9 @@ impl<'a> Build<'a> {
         Some(vec![PersistentVolumeClaim {
             metadata: ObjectMeta {
                 name: Some(DATA_VOLUME.to_string()),
+                // Labels select our PVCs back for in-place expansion;
+                // the StatefulSet controller never adopts foreign claims.
+                labels: Some(self.labels.clone()),
                 ..Default::default()
             },
             spec: Some(PersistentVolumeClaimSpec {

@@ -170,6 +170,12 @@ impl<'a> Build<'a> {
                 service_name: Some(self.service_name.clone()),
                 template: self.pod_template()?,
                 volume_claim_templates: self.claims(),
+                persistent_volume_claim_retention_policy: Some(
+                    k8s_openapi::api::apps::v1::StatefulSetPersistentVolumeClaimRetentionPolicy {
+                        when_deleted: Some("Retain".to_string()),
+                        when_scaled: Some("Retain".to_string()),
+                    },
+                ),
                 ..Default::default()
             }),
             status: None,

@@ -2,8 +2,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::core::v1::{ConfigMap, Secret, Service};
+use k8s_openapi::api::core::v1::{ConfigMap, PersistentVolumeClaim, Secret, Service};
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
+use k8s_openapi::api::storage::v1::StorageClass;
 use kube::Api;
 use kube::runtime::controller::Action;
 
@@ -32,6 +33,8 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     let configmaps: Api<ConfigMap> = Api::namespaced(ctx.client.clone(), &namespace);
     let statefulsets: Api<StatefulSet> = Api::namespaced(ctx.client.clone(), &namespace);
     let secrets: Api<Secret> = Api::namespaced(ctx.client.clone(), &namespace);
+    let pvcs: Api<PersistentVolumeClaim> = Api::namespaced(ctx.client.clone(), &namespace);
+    let storage_classes: Api<StorageClass> = Api::all(ctx.client.clone());
     let pdbs: Api<PodDisruptionBudget> = Api::namespaced(ctx.client.clone(), &namespace);
     let clusters: Api<FlussCluster> = Api::namespaced(ctx.client.clone(), &namespace);
 
@@ -53,7 +56,15 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     let workloads_blocked = observations.iter().any(|o| o.blocked_guardrail().is_some());
     if !workloads_blocked {
         observations.extend(
-            reconcilers::statefulset::reconcile(&statefulsets, &secrets, &cluster, &uid).await?,
+            reconcilers::statefulset::reconcile(
+                &statefulsets,
+                &secrets,
+                &pvcs,
+                &storage_classes,
+                &cluster,
+                &uid,
+            )
+            .await?,
         );
         observations
             .extend(reconcilers::pod_disruption_budget::reconcile(&pdbs, &cluster, &uid).await?);
@@ -87,6 +98,9 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
             kind: "poddisruptionbudget".to_string(),
             name: name.to_string(),
         });
+    }
+    if let Some((_, message)) = observations.iter().find_map(Observation::blocked_volume) {
+        return Err(Error::InvalidConfig(message.to_string()));
     }
     if let Some(message) = observations.iter().find_map(Observation::blocked_guardrail) {
         return Err(Error::InvalidConfig(message.to_string()));

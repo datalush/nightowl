@@ -74,7 +74,9 @@ fn check_one(
 /// (`1.5Gi`). Larger units (`T` and up) are rejected on purpose: heaps that
 /// big cannot be guarded here, so they stay forbidden alongside heap `1T`.
 /// Exact integer arithmetic throughout — no floats near a block boundary.
-fn parse_memory_bytes(quantity: &str) -> Option<u128> {
+/// Shared with the volume lifecycle guard, which compares storage sizes in
+/// the same quantity language.
+pub(crate) fn parse_memory_bytes(quantity: &str) -> Option<u128> {
     let split = quantity
         .find(|c: char| !(c.is_ascii_digit() || c == '.'))
         .unwrap_or(quantity.len());

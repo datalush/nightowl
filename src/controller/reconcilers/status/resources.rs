@@ -74,6 +74,18 @@ pub(super) fn condition_tuple(
         );
     }
 
+    if let Some((name, message)) = observations.iter().find_map(|o| match o {
+        Observation::VolumeBlocked { name, message } => Some((name.clone(), message.clone())),
+        _ => None,
+    }) {
+        return (
+            ConditionStatus::False,
+            "VolumeBlocked".to_string(),
+            message,
+            vec![format!("volume lifecycle for {name} blocked")],
+        );
+    }
+
     let (reason, detail, name) = observations
         .iter()
         .find_map(|o| match o {
@@ -121,6 +133,12 @@ pub(super) fn condition_tuple(
             evidence.push(format!(
                 "poddisruptionbudget {name} {}",
                 outcome_detail(outcome)
+            ));
+        }
+        if let Observation::PvcResized { names } = o {
+            evidence.push(format!(
+                "persistentvolumeclaims resized: {}",
+                names.join(", ")
             ));
         }
     }

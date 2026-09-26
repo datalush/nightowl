@@ -12,7 +12,10 @@
 //! coordinator that never readies blocks tablets instead of wedging them.
 
 use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::core::v1::{Container, PodSpec, PodTemplateSpec, Secret, Volume};
+use k8s_openapi::api::core::v1::{
+    Container, PersistentVolumeClaim, PodSpec, PodTemplateSpec, Secret, Volume,
+};
+use k8s_openapi::api::storage::v1::StorageClass;
 use kube::Api;
 
 use super::Observation;
@@ -29,6 +32,8 @@ use crate::resources::statefulset as builder;
 pub async fn reconcile(
     statefulsets: &Api<StatefulSet>,
     secrets: &Api<Secret>,
+    pvcs: &Api<PersistentVolumeClaim>,
+    storage_classes: &Api<StorageClass>,
     cluster: &FlussCluster,
     uid: &str,
 ) -> Result<Vec<Observation>, Error> {
@@ -36,10 +41,12 @@ pub async fn reconcile(
     // afterwards for rotation detection. `None` under workload identity or
     // when the Secret cannot be read (the storage guardrail reports that).
     let live_hash = live_secret_hash(secrets, cluster).await?;
-    let mut observations = Vec::with_capacity(4);
-    observations.push(
-        converge_one(
+    let mut observations = Vec::with_capacity(6);
+    observations.extend(
+        converge_role(
             statefulsets,
+            pvcs,
+            storage_classes,
             cluster,
             uid,
             Role::Coordinator,
@@ -48,9 +55,11 @@ pub async fn reconcile(
         .await?,
     );
     if coordinator_ready(statefulsets, cluster).await? {
-        observations.push(
-            converge_one(
+        observations.extend(
+            converge_role(
                 statefulsets,
+                pvcs,
+                storage_classes,
                 cluster,
                 uid,
                 Role::Tablet,
@@ -249,6 +258,38 @@ impl Role {
     }
 }
 
+async fn converge_role(
+    statefulsets: &Api<StatefulSet>,
+    pvcs: &Api<PersistentVolumeClaim>,
+    storage_classes: &Api<StorageClass>,
+    cluster: &FlussCluster,
+    uid: &str,
+    role: Role,
+    secret_hash: Option<&str>,
+) -> Result<Vec<Observation>, Error> {
+    // Storage lifecycle gates the template update: shrink, class change or
+    // denied growth refuse with evidence instead of converging. Growth
+    // patches the live PVCs first (in the check itself), so the template
+    // update that follows only carries the new size to future pods.
+    let volume_role = match role {
+        Role::Coordinator => super::volume::Role::Coordinator,
+        Role::Tablet => super::volume::Role::Tablet,
+    };
+    if let Some(observation) =
+        super::volume::check(statefulsets, pvcs, storage_classes, cluster, volume_role).await?
+    {
+        if matches!(observation, Observation::VolumeBlocked { .. }) {
+            return Ok(vec![observation]);
+        }
+        let mut observations = vec![observation];
+        observations.push(converge_one(statefulsets, cluster, uid, role, secret_hash).await?);
+        return Ok(observations);
+    }
+    Ok(vec![
+        converge_one(statefulsets, cluster, uid, role, secret_hash).await?,
+    ])
+}
+
 async fn converge_one(
     api: &Api<StatefulSet>,
     cluster: &FlussCluster,
@@ -326,27 +367,51 @@ fn same_statefulset(a: &StatefulSet, b: &StatefulSet) -> bool {
             a_spec.volume_claim_templates.as_deref(),
             b_spec.volume_claim_templates.as_deref(),
         )
+        && a_spec.persistent_volume_claim_retention_policy
+            == b_spec.persistent_volume_claim_retention_policy
 }
 
-/// Claim templates compare without `status`: the apiserver injects
-/// `status.phase` into the stored templates, which must never read as
-/// drift (verified live — this exact mismatch rewrote StatefulSets).
+/// Claim templates compare without `status` (the apiserver injects
+/// `status.phase` into stored templates) and without size: the apiserver
+/// forbids updating claim templates on a live StatefulSet at all, so size
+/// growth converges the live PVCs directly (see `volume`) and the template
+/// keeps the size new claims start from. Comparing size here would rewrite
+/// forever against a rejection.
+/// Claim templates compare without `status` and without size: the apiserver
+/// injects `status.phase` into stored templates, and forbids updating claim
+/// templates on a live StatefulSet at all. Size growth converges the live
+/// PVCs directly (see `volume`); the template only sizes brand-new claims.
+/// Comparing either would rewrite forever against a rejection.
 fn same_claims(
     a: Option<&[k8s_openapi::api::core::v1::PersistentVolumeClaim]>,
     b: Option<&[k8s_openapi::api::core::v1::PersistentVolumeClaim]>,
 ) -> bool {
-    fn key(
-        claims: &[k8s_openapi::api::core::v1::PersistentVolumeClaim],
-    ) -> Vec<(
-        k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta,
-        Option<k8s_openapi::api::core::v1::PersistentVolumeClaimSpec>,
-    )> {
-        claims
-            .iter()
-            .map(|claim| (claim.metadata.clone(), claim.spec.clone()))
-            .collect()
+    match (a, b) {
+        (None, None) => true,
+        (Some(a), Some(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(a, b)| same_claim(a, b))
+        }
+        _ => false,
     }
-    key(a.unwrap_or_default()) == key(b.unwrap_or_default())
+}
+
+/// One claim template: metadata, access modes, class and mode. Excluded:
+/// `status` (injected) and `resources.requests.storage` (grown in place;
+/// the template never updates on a live object).
+fn same_claim(
+    a: &k8s_openapi::api::core::v1::PersistentVolumeClaim,
+    b: &k8s_openapi::api::core::v1::PersistentVolumeClaim,
+) -> bool {
+    let spec = |claim: &k8s_openapi::api::core::v1::PersistentVolumeClaim| {
+        claim.spec.as_ref().map(|spec| {
+            (
+                spec.access_modes.clone(),
+                spec.storage_class_name.clone(),
+                spec.volume_mode.clone(),
+            )
+        })
+    };
+    a.metadata == b.metadata && spec(a) == spec(b)
 }
 
 /// Template metadata is managed except the secret pin: labels plus our
@@ -618,6 +683,46 @@ mod tests {
         assert!(
             !same_statefulset(&desired, &live),
             "image change must read as drift"
+        );
+    }
+
+    #[test]
+    fn claim_size_and_status_do_not_read_as_drift() {
+        // The apiserver forbids updating claim templates on a live
+        // StatefulSet, so size growth converges the live PVCs directly and
+        // the template comparison must not fight the rejection. Same for
+        // the injected claim status.
+        let cluster = spike_cluster();
+        let desired = crate::resources::statefulset::desired_tablet_statefulset(&cluster, None)
+            .expect("valid CR must render");
+        let mut grown = server_defaulted(desired.clone());
+        grown
+            .spec
+            .as_mut()
+            .expect("statefulset needs a spec")
+            .volume_claim_templates
+            .as_mut()
+            .expect("tablet needs claims")[0]
+            .spec
+            .as_mut()
+            .expect("claim needs a spec")
+            .resources
+            .as_mut()
+            .expect("claim needs resources")
+            .requests = Some(
+            ["storage".to_string()]
+                .into_iter()
+                .map(|name| {
+                    (
+                        name,
+                        k8s_openapi::apimachinery::pkg::api::resource::Quantity("99Gi".to_string()),
+                    )
+                })
+                .collect(),
+        );
+        assert!(
+            same_statefulset(&desired, &grown),
+            "claim size/status must not read as drift: the apiserver forbids the update"
         );
     }
 
