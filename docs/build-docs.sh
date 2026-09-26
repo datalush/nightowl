@@ -11,8 +11,8 @@ mdbook build "$book_root"
 
 MDBOOK_BOOK__SRC=es \
 MDBOOK_BOOK__LANGUAGE=es \
-MDBOOK_BOOK__TITLE="Operador de Fluss" \
-MDBOOK_BOOK__DESCRIPTION="Un operador independiente de Kubernetes para Apache Fluss" \
+MDBOOK_BOOK__TITLE="Owl" \
+MDBOOK_BOOK__DESCRIPTION="Opera Apache Fluss en Kubernetes con Owl" \
 MDBOOK_BUILD__BUILD_DIR=../target/book/es \
   mdbook build "$book_root"
 

@@ -7,7 +7,7 @@
 //! cannot use dev-dependencies).
 
 use kube::CustomResourceExt;
-use operator::api::FlussCluster;
+use nightowl::api::FlussCluster;
 
 fn main() {
     let crd = FlussCluster::crd();

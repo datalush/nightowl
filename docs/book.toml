@@ -1,6 +1,6 @@
 [book]
-title = "Fluss Operator"
-description = "An independent Kubernetes Operator for Apache Fluss"
+title = "Owl"
+description = "Operate Apache Fluss on Kubernetes with Owl"
 language = "en"
 src = "en"
 
