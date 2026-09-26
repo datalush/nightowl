@@ -61,16 +61,31 @@ fn error_policy(cluster: Arc<FlussCluster>, error: &Error, _ctx: Arc<Context>) -
     }
 }
 
-/// Run the FlussCluster controller in `namespace` until the stream ends.
+/// One namespace or all of them, per the `--namespace` flag.
+fn scoped<T>(client: Client, namespace: &Option<String>) -> Api<T>
+where
+    T: kube::Resource<Scope = kube::core::NamespaceResourceScope>,
+    T::DynamicType: Default,
+{
+    match namespace {
+        Some(namespace) => Api::namespaced(client, namespace),
+        None => Api::all(client),
+    }
+}
+
+/// Run the FlussCluster controller until the stream ends.
 ///
-/// Watches FlussCluster objects and the Services they own, so deleting a
-/// managed Service triggers a new reconciliation that recreates it.
-pub async fn run(client: Client, namespace: &str) {
-    let clusters: Api<FlussCluster> = Api::namespaced(client.clone(), namespace);
-    let services: Api<Service> = Api::namespaced(client.clone(), namespace);
-    let configmaps: Api<ConfigMap> = Api::namespaced(client.clone(), namespace);
-    let statefulsets: Api<StatefulSet> = Api::namespaced(client.clone(), namespace);
-    let pdbs: Api<PodDisruptionBudget> = Api::namespaced(client.clone(), namespace);
+/// With `Some(namespace)` watches that namespace only; with `None` watches
+/// all namespaces. Per-object reconciliation already keys off the object's
+/// own namespace, so only the watch scope changes here. Watches
+/// FlussCluster objects and the resources they own, so deleting a managed
+/// object triggers a new reconciliation that recreates it.
+pub async fn run(client: Client, namespace: Option<String>) {
+    let clusters: Api<FlussCluster> = scoped(client.clone(), &namespace);
+    let services: Api<Service> = scoped(client.clone(), &namespace);
+    let configmaps: Api<ConfigMap> = scoped(client.clone(), &namespace);
+    let statefulsets: Api<StatefulSet> = scoped(client.clone(), &namespace);
+    let pdbs: Api<PodDisruptionBudget> = scoped(client.clone(), &namespace);
     let context = Arc::new(Context { client });
 
     Controller::new(clusters, watcher::Config::default())
@@ -90,4 +105,117 @@ pub async fn run(client: Client, namespace: &str) {
             }
         })
         .await;
+}
+
+#[cfg(test)]
+mod deploy_tests {
+    use std::collections::BTreeSet;
+
+    /// The checked-in manifests must grant exactly the verbs the controller
+    /// uses — no more, no less. Widen the code (a new delete path, a new
+    /// watched kind) and this test forces the manifests to follow
+    /// consciously, in the same commit.
+    #[test]
+    fn clusterrole_grants_exactly_the_verbs_the_controller_uses() {
+        let role: k8s_openapi::api::rbac::v1::ClusterRole =
+            serde_yaml::from_str(include_str!("../../deploy/clusterrole.yaml"))
+                .expect("clusterrole must parse");
+        let rules = role.rules.expect("clusterrole needs rules");
+        assert_eq!(rules.len(), 6, "one rule per row of the verb matrix");
+
+        let mut remaining: Vec<(Vec<String>, Vec<String>, Vec<String>)> = rules
+            .iter()
+            .map(|rule| {
+                (
+                    sorted(rule.api_groups.as_deref().unwrap_or(&[])),
+                    sorted(rule.resources.as_deref().unwrap_or(&[])),
+                    sorted(&rule.verbs),
+                )
+            })
+            .collect();
+        for (groups, resources, verbs) in [
+            (
+                vec!["fluss.datalush.com"],
+                vec!["flussclusters"],
+                vec!["get", "list", "watch"],
+            ),
+            (
+                vec!["fluss.datalush.com"],
+                vec!["flussclusters/status"],
+                vec!["update"],
+            ),
+            (
+                vec![""],
+                vec!["configmaps", "services"],
+                vec!["create", "get", "list", "patch", "update", "watch"],
+            ),
+            (
+                vec!["apps"],
+                vec!["statefulsets"],
+                vec!["create", "get", "list", "patch", "update", "watch"],
+            ),
+            (
+                vec!["policy"],
+                vec!["poddisruptionbudgets"],
+                vec![
+                    "create", "delete", "get", "list", "patch", "update", "watch",
+                ],
+            ),
+            (vec![""], vec!["secrets", "serviceaccounts"], vec!["get"]),
+        ] {
+            let position = remaining.iter().position(|(g, r, v)| {
+                g == &groups.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+                    && r == &resources.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+                    && v == &verbs.iter().map(|s| s.to_string()).collect::<Vec<_>>()
+            });
+            assert!(
+                position.is_some(),
+                "missing rule for {groups:?} {resources:?} {verbs:?}"
+            );
+            remaining.remove(position.expect("checked above"));
+        }
+        assert!(remaining.is_empty(), "no extra rules: {remaining:?}");
+    }
+
+    #[test]
+    fn binding_and_workload_point_at_the_same_service_account() {
+        let binding: k8s_openapi::api::rbac::v1::ClusterRoleBinding =
+            serde_yaml::from_str(include_str!("../../deploy/clusterrolebinding.yaml"))
+                .expect("binding must parse");
+        assert_eq!(binding.role_ref.name, "nightowl");
+        let subjects = binding.subjects.expect("binding needs subjects");
+        assert_eq!(subjects.len(), 1);
+        assert_eq!(subjects[0].name, "nightowl");
+        assert_eq!(
+            subjects[0].namespace.as_deref(),
+            Some("operator-system"),
+            "least privilege starts with naming the right namespace"
+        );
+
+        let deployment: k8s_openapi::api::apps::v1::Deployment =
+            serde_yaml::from_str(include_str!("../../deploy/deployment.yaml"))
+                .expect("deployment must parse");
+        assert_eq!(
+            deployment
+                .spec
+                .as_ref()
+                .expect("deployment needs a spec")
+                .template
+                .spec
+                .as_ref()
+                .expect("pod template needs a spec")
+                .service_account_name,
+            Some("nightowl".to_string()),
+            "the pod must run as the bound account, not the default one"
+        );
+    }
+
+    fn sorted(values: &[String]) -> Vec<String> {
+        values
+            .iter()
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
 }

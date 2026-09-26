@@ -1,0 +1,35 @@
+# Least-privilege ClusterRole for the nightowl operator (option A: one
+# operator watches all namespaces; controller logic narrows to namespaces
+# holding FlussClusters and never adopts foreign objects).
+#
+# Verb matrix (mirrored by a unit test — widen code and manifests together):
+# - flussclusters: read the CRs, write only .status (never spec).
+# - services, configmaps, statefulsets, poddisruptionbudgets: converge owned
+#   children. delete exists ONLY on poddisruptionbudgets (disable-to-absent);
+#   everything else is garbage-collected via ownerReferences, which costs no
+#   permission.
+# - secrets, serviceaccounts: get-only preflight. No list/watch: the
+#   operator cannot even enumerate credentials it was not told about.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nightowl
+rules:
+  - apiGroups: ["fluss.datalush.com"]
+    resources: ["flussclusters"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["fluss.datalush.com"]
+    resources: ["flussclusters/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["secrets", "serviceaccounts"]
+    verbs: ["get"]

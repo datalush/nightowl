@@ -1,0 +1,27 @@
+# Single-replica operator. No leader election: one pod is the whole
+# control plane (its own PDB and HA arrive with the c5p6 installer).
+# Set image to a published build; k3d labs use `k3d image import`.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nightowl
+  namespace: operator-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nightowl
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nightowl
+    spec:
+      serviceAccountName: nightowl
+      containers:
+        - name: nightowl
+          image: nightowl:latest
+          args: []
+          # [] watches all namespaces; otherwise ["--namespace", "<name>"].
+          env:
+            - name: RUST_LOG
+              value: info
