@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
     namespaced,
     status = "FlussClusterStatus"
 )]
+#[schemars(extend("x-kubernetes-validations" = [{
+    "rule": "!has(self.defaults) || self.defaults.logReplicationFactor <= self.tabletServers.replicas",
+    "message": "logReplicationFactor must not exceed tabletServers replicas"
+}]))]
 #[serde(rename_all = "camelCase")]
 pub struct FlussClusterSpec {
     pub version: String,
@@ -507,6 +511,20 @@ mod tests {
             );
         }
         assert!(schema["properties"]["status"].is_object());
+        let validations = &schema["properties"]["spec"]["x-kubernetes-validations"];
+        assert!(validations.is_array());
+        let rules: Vec<&str> = validations
+            .as_array()
+            .expect("spec validations must be an array")
+            .iter()
+            .filter_map(|v| v["rule"].as_str())
+            .collect();
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.contains("logReplicationFactor") && r.contains("tabletServers")),
+            "missing RF<=tablets validation, got: {rules:?}"
+        );
         let s3 = &schema["properties"]["spec"]["properties"]["remoteStorage"]["properties"]["s3"];
         assert!(s3["x-kubernetes-validations"].is_array());
         assert!(s3["properties"]["authentication"]["x-kubernetes-validations"].is_array());
