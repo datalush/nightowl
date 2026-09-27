@@ -10,6 +10,7 @@
 - [Almacenamiento remoto y credenciales](api/remote-storage.md)
 - [Estado y condiciones](api/status.md)
 - [Auditoría FIP-41 y matriz Admin](api/fip41.md)
+- [Recreación del lab y versiones](api/lab.md)
 
 # Ejemplos de configuración
 

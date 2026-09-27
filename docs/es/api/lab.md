@@ -1,0 +1,61 @@
+# Recreación del lab, reset y registro de versiones
+
+El lab es un clúster k3d más piezas compartidas externas. Nada aquí provisiona credenciales: los secretos S3 se aplican como Secret efímero imperativo en el momento del test, jamás commiteados (ver la discusión de secretos en reposo).
+
+## Recrear desde cero
+
+```bash
+# 1. Clúster: 1 server + 3 agents (el placement entre nodos es observable).
+k3d cluster create lab --servers 1 --agents 3
+kubectl create namespace fluss
+kubectl create namespace operator-dev
+
+# 2. ZooKeeper (externo al operador; el operador jamás lo provisiona).
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm install zk bitnami/zookeeper \
+  --namespace fluss --version 0.15.0
+
+# 3. Fluss de referencia (vía Helm; el operador no toca este namespace).
+helm repo add fluss https://downloads.apache.org/fluss/helm-chart
+helm install fluss fluss/fluss \
+  --namespace fluss --version 1.0.0
+
+# 4. Operador bajo prueba (desde este repo; corre contra operator-dev).
+kubectl apply -f deploy/crd.yaml
+RUST_LOG=info ./target/debug/nightowl --namespace operator-dev
+```
+
+Espera a `zk-zookeeper-0`, `coordinator-server-0` y los tres `tablet-server-N` en `fluss` antes de probar el operador.
+
+## Acceso desde el host para tests (temporal, retirar después)
+
+Fluss anuncia DNS estables de pod, que el host no resuelve, e IPs de pod, que el host no enruta. Ambas cosas necesitan setup temporal en el host mientras dura el test:
+
+```bash
+# Ruta al CIDR de pods vía la IP de cualquier nodo k3d (ver con
+# `docker inspect k3d-lab-server-0`).
+sudo ip route add 10.42.0.0/16 via <ip-nodo-k3d>
+
+# Una línea de /etc/hosts por pod bajo prueba:
+# <ip-pod> <pod>.<headless-svc>.<namespace>.svc.cluster.local
+```
+
+Retira ambas al terminar (`ip route del`, borrar las líneas de hosts). Los fallos de test que hablen de resolución de nombres o IPs de pod inalcanzables son fallos del setup del host, no del operador. El Secret S3 efímero se borra con el test (`kubectl delete secret … -n operator-dev`).
+
+## Procedimientos de reset
+
+- **Un test**: borrar el CR, luego todos los PVCs y el Secret efímero en `operator-dev`; parar el operador; retirar ruta y líneas de hosts. El namespace debe quedar vacío (`kubectl get all,pdb,pvc,secrets -n operator-dev` no muestra nada).
+- **Lab completo**: `k3d cluster delete lab` y seguir “Recrear desde cero”. Esto borra también el clúster de referencia y la metadata de ZooKeeper —solo hacerlo a propósito.
+
+## Registro de versiones (verificado en vivo 2026-09-27)
+
+| Componente | Versión |
+| --- | --- |
+| k3d | v5.9.0 |
+| Kubernetes (k3s) | v1.35.5+k3s1 (1 server + 3 agents) |
+| ZooKeeper (chart Bitnami / app) | zookeeper-0.15.0 / 3.9.5 |
+| Fluss de referencia (chart / app) | fluss-1.0.0 / `apache/fluss:1.0.0` |
+| Imagen bajo prueba | `apache/fluss:1.0.0` vía `spec.version` del CR |
+| Almacenamiento remoto | RustFS 1.0.0 externo (hardware del lab, fuera de banda) |
+
+Refresca esta tabla cada vez que el lab se mueva. El namespace `fluss` de referencia es una instalación Helm fija para comparar; los tests del operador corren exclusivamente en `operator-dev`.

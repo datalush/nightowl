@@ -10,6 +10,7 @@
 - [Remote storage and credentials](api/remote-storage.md)
 - [Status and conditions](api/status.md)
 - [FIP-41 audit and Admin matrix](api/fip41.md)
+- [Lab recreation and versions](api/lab.md)
 
 # Configuration examples
 
