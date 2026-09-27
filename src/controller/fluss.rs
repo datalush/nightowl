@@ -95,8 +95,9 @@ pub async fn probe(cluster: &FlussCluster, clock: &ProbeClock) -> Vec<Observatio
 }
 
 /// Coordinator ordinal zero over the internal listener: the stable address
-/// of whoever owns cluster health.
-fn bootstrap_address(cluster: &FlussCluster) -> Option<String> {
+/// of whoever owns cluster health. Shared with the dynamic-config step,
+/// which speaks to the same Admin endpoint.
+pub(crate) fn bootstrap_address(cluster: &FlussCluster) -> Option<String> {
     let name = cluster.metadata.name.clone()?;
     let namespace = cluster.metadata.namespace.clone()?;
     let port = cluster.spec.listeners.as_ref()?.internal.port;

@@ -57,13 +57,14 @@ Still absent until the per-server Admin read API exists: `coordinator.activePod`
 | `observedGeneration` | integer, optional | The last CR generation whose desired state has actually been handled. |
 | `observedConfigHash` | string, optional | Combined `sha256:<hex>` over the rendered coordinator and tablet `server.yaml` documents (coordinator first); each ConfigMap also carries its own hash annotation for future rollout triggers. |
 | `observedVersion` | string, optional | Version confirmed by observation, not simply requested. |
+| `appliedDynamicConfig` | map, optional | Applied dynamic keys to value-hashes (hashes only, never values); records what Admin already holds. |
 | `clusterHealth` | optional object | `GREEN`, `YELLOW`, `RED`, or `UNKNOWN`, plus global replica/ISR/leader counts. |
 | `coordinatorEndpoints` | list of strings | Endpoints clients can use to discover the Coordinator. |
 | `coordinator` | optional object | Desired/ready replicas and optional `activePod`. |
 | `tabletServers` | optional object | Desired/ready replicas and optional per-pod `assignedTablets`/`replicaHealth`. |
 | `conditions` | list | Independent operational statements with evidence and transition time. |
 
-Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`; `type` is also an enum: `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, or `OperationBlocked`. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy` and `S3CredentialsStale` run today; the rest are planned.
+Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`; `type` is also an enum: `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, or `OperationBlocked`. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` and `OperationBlocked` (dynamic-config rejections) run today; the rest are planned.
 
 Fluss 1.0's `getClusterHealth()` supports global counters. The per-pod `assignedTablets` and `replicaHealth` fields require the proposed per-server Admin read API; they must remain absent while unavailable, not be invented from Pod readiness.
 

@@ -19,7 +19,7 @@ use kube::Api;
 use kube::api::PostParams;
 
 use super::Observation;
-use crate::api::{FlussCluster, FlussClusterStatus, FlussConditionType};
+use crate::api::{ConditionStatus, FlussCluster, FlussClusterStatus, FlussConditionType};
 use crate::controller::Error;
 
 /// Render the desired status from observations and write it if it changed.
@@ -73,6 +73,21 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
     ];
     conditions.extend(fluss::conditions(cluster, observations));
     conditions.extend(storage::secret_condition(cluster, observations));
+    // Dynamic config: a rejection is a stall the status must explain (j5v3);
+    // applied hashes replace the field wholesale when this pass applied.
+    if let Some(message) = observations.iter().find_map(|o| match o {
+        Observation::DynamicConfigBlocked { message } => Some(message),
+        _ => None,
+    }) {
+        conditions.push(common::condition(
+            cluster,
+            FlussConditionType::OperationBlocked,
+            ConditionStatus::True,
+            "DynamicConfigRejected".to_string(),
+            message.clone(),
+            Vec::new(),
+        ));
+    }
 
     FlussClusterStatus {
         observed_generation: cluster.metadata.generation,
@@ -81,6 +96,19 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
             Observation::ConfigHash { value } => Some(value.clone()),
             _ => None,
         }),
+        applied_dynamic_config: observations
+            .iter()
+            .find_map(|o| match o {
+                Observation::DynamicConfigApplied { applied } => Some(applied.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                cluster
+                    .status
+                    .as_ref()
+                    .map(|status| status.applied_dynamic_config.clone())
+            })
+            .unwrap_or_default(),
         cluster_health,
         coordinator_endpoints,
         coordinator,

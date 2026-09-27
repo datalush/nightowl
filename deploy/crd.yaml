@@ -3629,6 +3629,13 @@ spec:
           status:
             nullable: true
             properties:
+              appliedDynamicConfig:
+                additionalProperties:
+                  type: string
+                description: "Dynamically applied config as key to value-hash: records\
+                  \ what Admin\nalready holds, so restarts and replays stay idempotent.\
+                  \ Hashes only \u2014\nthe allowlist holds credential-bearing keys."
+                type: object
               clusterHealth:
                 nullable: true
                 properties:

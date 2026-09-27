@@ -407,6 +407,11 @@ pub struct FlussClusterStatus {
     pub tablet_servers: Option<TabletServersStatus>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub conditions: Vec<FlussClusterCondition>,
+    /// Dynamically applied config as key to value-hash: records what Admin
+    /// already holds, so restarts and replays stay idempotent. Hashes only —
+    /// the allowlist holds credential-bearing keys.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub applied_dynamic_config: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

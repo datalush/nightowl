@@ -8,6 +8,7 @@
 pub mod client_service;
 pub mod config_map;
 pub mod coordinator_service;
+pub mod dynamic_config;
 pub mod pod_disruption_budget;
 pub mod statefulset;
 pub mod status;
@@ -92,6 +93,16 @@ pub enum Observation {
     },
     ResourceBlocked {
         name: String,
+        message: String,
+    },
+    /// Dynamic config newly applied via Admin: the full standing map
+    /// (key to value-hash) after this reconcile, replacing the field.
+    DynamicConfigApplied {
+        applied: std::collections::BTreeMap<String, String>,
+    },
+    /// Dynamic config refused or unappliable right now, with the reason.
+    /// Never rolls anything: the keys stay pending for the next pass.
+    DynamicConfigBlocked {
         message: String,
     },
 }

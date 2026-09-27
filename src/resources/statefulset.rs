@@ -30,6 +30,7 @@ use crate::utils::render;
 
 use super::config_map;
 use super::server_config::ConfigError;
+use super::server_config::dynamic;
 use super::server_config::metrics;
 
 /// Staging path for the mounted ConfigMap: the image rewrites its own
@@ -139,7 +140,16 @@ impl<'a> Build<'a> {
             Role::Coordinator => config_map::coordinator_properties(cluster)?,
             Role::Tablet => config_map::tablet_properties(cluster)?,
         };
-        let server_yaml = render::to_yaml(&properties);
+        // Rollout identity covers the static subset only: dynamic keys ride
+        // Admin (see server_config::dynamic), so dynamic-only changes move
+        // no pods. Computed from both roles because cluster-wide appliability
+        // needs identical values on each side.
+        let other = match role {
+            Role::Coordinator => config_map::tablet_properties(cluster)?,
+            Role::Tablet => config_map::coordinator_properties(cluster)?,
+        };
+        let appliable = dynamic::appliable(&properties, &other);
+        let server_yaml = render::to_yaml(&dynamic::without_appliable(&properties, &appliable));
         let fallback = format!("{}:{}", cluster.spec.image.repository, cluster.spec.version);
         let image = match role {
             Role::Coordinator => cluster.spec.coordinator.image.clone().unwrap_or(fallback),
@@ -578,5 +588,44 @@ mod tests {
             Some("9250"),
             "user port override wins and stays consistent with scraping"
         );
+    }
+
+    #[test]
+    fn dynamic_only_change_moves_no_pods() {
+        use crate::resources::server_config::dynamic;
+        use crate::utils::hash;
+        use crate::utils::render;
+
+        let plain = spike_cluster();
+        let plain_sts = desired_tablet_statefulset(&plain, None).expect("valid CR must render");
+        let plain_hash = template_annotations(&plain_sts)
+            .get(crate::constants::CONFIG_HASH_ANNOTATION)
+            .expect("template pins a hash");
+
+        let mut changed = spike_cluster();
+        changed
+            .spec
+            .configuration_overrides
+            .insert("kv.snapshot.interval".to_string(), "30s".to_string());
+        let changed_sts = desired_tablet_statefulset(&changed, None).expect("valid CR must render");
+        let changed_hash = template_annotations(&changed_sts)
+            .get(crate::constants::CONFIG_HASH_ANNOTATION)
+            .expect("template pins a hash");
+        assert_eq!(
+            changed_hash, plain_hash,
+            "dynamic-only diffs must not change the rollout hash"
+        );
+
+        // And the hash that did stay still is the static subset, not luck:
+        // the full yaml does contain the new value.
+        let full = config_map::tablet_server_yaml(&changed).expect("same render must hold");
+        assert!(full.contains("kv.snapshot.interval: 30s"));
+        let coord = config_map::coordinator_properties(&changed).expect("props must render");
+        let tablet = config_map::tablet_properties(&changed).expect("props must render");
+        let appliable = dynamic::appliable(&coord, &tablet);
+        let expected = hash::sha256_hex(&render::to_yaml(&dynamic::without_appliable(
+            &tablet, &appliable,
+        )));
+        assert_eq!(changed_hash, &expected);
     }
 }

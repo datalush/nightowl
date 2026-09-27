@@ -73,6 +73,10 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     // and rate-limits itself. Runs even when workloads are blocked — old
     // pods from a previous good state may still answer.
     observations.extend(fluss::probe(&cluster, &ctx.probes).await);
+    // Dynamic config rides the fresh probe above: same pass, same health
+    // gate, and its observations land in the status write below.
+    let dynamic = reconcilers::dynamic_config::reconcile(&cluster, &observations).await;
+    observations.extend(dynamic);
 
     if reconcilers::status::reconcile(&clusters, &cluster, &observations).await? {
         tracing::info!(cluster = %name, "updated FlussCluster status");
