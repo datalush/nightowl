@@ -40,7 +40,9 @@ spec:
       bucket: fluss-lab
       prefix: clusters/data/rustfs-lab
       region: us-east-1
-      endpoint: http://192.168.68.200:9000
+      # Placeholder: replace with your S3-compatible endpoint. Never commit
+      # real infrastructure addresses or credentials here.
+      endpoint: http://s3-compatible.example.internal:9000
       pathStyleAccess: true
       authentication:
         type: secret
