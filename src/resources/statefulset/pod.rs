@@ -19,6 +19,7 @@ use crate::api::{ImagePullPolicy, ListenersSpec, SchedulingSpec};
 use crate::constants::{
     API_VERSION, CONFIG_HASH_ANNOTATION, KIND_FLUSS_CLUSTER, SECRET_HASH_ANNOTATION,
 };
+use crate::resources::server_config::metrics;
 
 impl<'a> Build<'a> {
     pub(super) fn pod_template(
@@ -32,6 +33,13 @@ impl<'a> Build<'a> {
             template_annotations.extend(t.annotations.clone());
         }
         template_annotations.insert(CONFIG_HASH_ANNOTATION.to_string(), self.config_hash.clone());
+        // Prometheus scrape follows the effective reporter port resolved at
+        // assemble time: absent exactly when nothing listens. Operator keys
+        // win on collision, like every other annotation here.
+        if let Some(port) = &self.scrape_port {
+            template_annotations.insert(metrics::ANNOTATION_SCRAPE.to_string(), "true".to_string());
+            template_annotations.insert(metrics::ANNOTATION_PORT.to_string(), port.clone());
+        }
         // Pinned for staleness detection only; the comparator ignores it so
         // rotation reports instead of rolling (restart policy is separate).
         if let Some(secret_hash) = &self.secret_hash {

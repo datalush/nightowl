@@ -30,7 +30,7 @@ Convenciones: **soportado** (implementado y verificado en lab), **bloqueado** (p
 | Defaults de tabla (buckets, RF, min-ISR) | Deliberadamente distinto (añadido) | FIP-41 no tiene sección de defaults; el nuestro renderiza `default.bucket.number` y guardas de replicación. |
 | Almacenamiento S3 estructurado + delegación | Deliberadamente distinto (añadido) | Más allá de la limitación de claves en texto plano de FIP-41; marcadores de Secret más AssumeRole/GetSessionToken verificados. |
 | Leader election del operador vía Lease | Diferido | Una sola réplica hoy; seguido con el empaquetado. |
-| Endpoint de métricas Prometheus | Diferido | Solo stub en la API; seguido con empaquetado/lab. |
+| Endpoint de métricas Prometheus | Soportado (parcial) | Clave de reporter más anotaciones de scrape cableadas, activas por defecto con opt-out; Service/ServiceMonitor de métricas y métricas propias del reconciler siguen diferidos con el empaquetado. |
 | Adopción in-place (Path A) / reemplazo con drain (Path B) | Diferido | Seguido por separado; el operador jamás adopta recursos ajenos. |
 | Job de lake tiering, gestión de tablas, orquestación de backup/restore | Fuera de alcance | Coincide con los non-goals de FIP-41; restore es observar e informar. |
 

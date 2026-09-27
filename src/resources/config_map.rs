@@ -125,18 +125,18 @@ pub fn desired_tablet_config(
     })
 }
 
-/// Rendered coordinator `server.yaml`, shared by the ConfigMap and the
-/// StatefulSet pod-template hash.
-///
-/// Single source of truth: both objects must agree on the content, or the
-/// rollout hash would drift from what the pods actually mount.
-pub(crate) fn coordinator_server_yaml(
+/// Merged coordinator properties, before YAML rendering: base modules,
+/// the metrics reporter base when enabled, then user overrides (which keep
+/// precedence), then the quorum guard. Shared by the ConfigMap, the
+/// pod-template hash, and the scrape annotations, so all three agree.
+pub(crate) fn coordinator_properties(
     cluster: &FlussCluster,
-) -> Result<String, server_config::ConfigError> {
+) -> Result<BTreeMap<String, String>, server_config::ConfigError> {
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
     properties.extend(server_config::table_defaults::properties(cluster));
+    properties.extend(server_config::metrics::base_properties(cluster));
     properties.extend(server_config::jvm::properties(
         cluster.spec.coordinator.jvm.as_ref(),
         server_config::jvm::COORDINATOR_JVM_KEY,
@@ -147,18 +147,29 @@ pub(crate) fn coordinator_server_yaml(
         &cluster.spec.coordinator.configuration_overrides,
     )?;
     server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
-    Ok(render::to_yaml(&properties))
+    Ok(properties)
 }
 
-/// Rendered tablet `server.yaml`, shared by the ConfigMap and the
-/// StatefulSet pod-template hash. See [`coordinator_server_yaml`].
-pub(crate) fn tablet_server_yaml(
+/// Rendered coordinator `server.yaml`, shared by the ConfigMap and the
+/// StatefulSet pod-template hash.
+///
+/// Single source of truth: both objects must agree on the content, or the
+/// rollout hash would drift from what the pods actually mount.
+pub(crate) fn coordinator_server_yaml(
     cluster: &FlussCluster,
 ) -> Result<String, server_config::ConfigError> {
+    Ok(render::to_yaml(&coordinator_properties(cluster)?))
+}
+
+/// Merged tablet properties. See [`coordinator_properties`].
+pub(crate) fn tablet_properties(
+    cluster: &FlussCluster,
+) -> Result<BTreeMap<String, String>, server_config::ConfigError> {
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
     properties.extend(server_config::storage::properties(cluster));
     properties.extend(server_config::table_defaults::properties(cluster));
+    properties.extend(server_config::metrics::base_properties(cluster));
     properties.insert(
         "data.dir".to_string(),
         server_config::storage::data_dir(cluster),
@@ -173,5 +184,13 @@ pub(crate) fn tablet_server_yaml(
         &cluster.spec.tablet_servers.configuration_overrides,
     )?;
     server_config::table_defaults::ensure_quorum(&mut properties, cluster.spec.defaults.as_ref())?;
-    Ok(render::to_yaml(&properties))
+    Ok(properties)
+}
+
+/// Rendered tablet `server.yaml`, shared by the ConfigMap and the
+/// StatefulSet pod-template hash. See [`coordinator_server_yaml`].
+pub(crate) fn tablet_server_yaml(
+    cluster: &FlussCluster,
+) -> Result<String, server_config::ConfigError> {
+    Ok(render::to_yaml(&tablet_properties(cluster)?))
 }

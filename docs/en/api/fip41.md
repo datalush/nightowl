@@ -30,7 +30,7 @@ Conventions: **supported** (implemented and lab-verified), **blocked** (needs up
 | Table defaults (buckets, RF, min-ISR) | Intentionally different (addition) | FIP-41 has no defaults section; ours renders `default.bucket.number` and replication guards. |
 | Structured S3 remote storage + delegation | Intentionally different (addition) | Beyond FIP-41's plaintext-key limitation; Secret markers plus AssumeRole/GetSessionToken verified. |
 | Operator leader election via Lease | Deferred | Single replica today; tracked with packaging. |
-| Prometheus metrics endpoint | Deferred | API stub only; tracked with packaging/lab work. |
+| Prometheus metrics endpoint | Supported (partial) | Reporter key plus scrape annotations wired, default-on with opt-out; metrics Service/ServiceMonitor and reconciler-own metrics stay deferred with packaging. |
 | In-place adoption (Path A) / drain-mode replacement (Path B) | Deferred | Tracked separately; the operator never adopts foreign resources. |
 | Lake tiering job, table management, backup/restore orchestration | Out of scope | Matches FIP-41 non-goals; restore is observe-and-report. |
 

@@ -26,9 +26,11 @@ use crate::constants::{
     TABLET_HEADLESS_SUFFIX, TABLET_STATEFULSET_SUFFIX,
 };
 use crate::utils::hash;
+use crate::utils::render;
 
 use super::config_map;
 use super::server_config::ConfigError;
+use super::server_config::metrics;
 
 /// Staging path for the mounted ConfigMap: the image rewrites its own
 /// `server.yaml` at boot, so the read-only ConfigMap mount must land
@@ -112,6 +114,10 @@ struct Build<'a> {
     labels: BTreeMap<String, String>,
     config_hash: String,
     secret_hash: Option<String>,
+    /// Effective Prometheus scrape port, resolved once from the same merged
+    /// properties the config hash covers — so annotations can never disagree
+    /// with the rendered reporter. `None` means opted out or overridden away.
+    scrape_port: Option<String>,
 }
 
 impl<'a> Build<'a> {
@@ -129,10 +135,11 @@ impl<'a> Build<'a> {
             .name
             .clone()
             .expect("FlussCluster needs a name");
-        let server_yaml = match role {
-            Role::Coordinator => config_map::coordinator_server_yaml(cluster)?,
-            Role::Tablet => config_map::tablet_server_yaml(cluster)?,
+        let properties = match role {
+            Role::Coordinator => config_map::coordinator_properties(cluster)?,
+            Role::Tablet => config_map::tablet_properties(cluster)?,
         };
+        let server_yaml = render::to_yaml(&properties);
         let fallback = format!("{}:{}", cluster.spec.image.repository, cluster.spec.version);
         let image = match role {
             Role::Coordinator => cluster.spec.coordinator.image.clone().unwrap_or(fallback),
@@ -153,6 +160,7 @@ impl<'a> Build<'a> {
             ]),
             config_hash: hash::sha256_hex(&server_yaml),
             secret_hash: secret_hash.map(str::to_string),
+            scrape_port: metrics::scrape_port(&properties),
             cluster_name,
             image,
         })
@@ -488,6 +496,87 @@ mod tests {
                 .map(String::as_str),
             Some("sha256:abc"),
             "pod template pins the secret hash for rotation detection"
+        );
+    }
+
+    fn template_annotations(
+        sts: &k8s_openapi::api::apps::v1::StatefulSet,
+    ) -> &std::collections::BTreeMap<String, String> {
+        sts.spec
+            .as_ref()
+            .expect("statefulset needs a spec")
+            .template
+            .metadata
+            .as_ref()
+            .expect("pod template needs metadata")
+            .annotations
+            .as_ref()
+            .expect("pod template needs annotations")
+    }
+
+    #[test]
+    fn scrape_annotations_follow_the_default_on_reporter() {
+        // demo.yml sets no observability: default-on renders the reporter key
+        // and both roles carry scrape annotations on the default port.
+        let cluster = spike_cluster();
+        for sts in [
+            desired_coordinator_statefulset(&cluster, None).expect("valid CR must render"),
+            desired_tablet_statefulset(&cluster, None).expect("valid CR must render"),
+        ] {
+            let annotations = template_annotations(&sts);
+            assert_eq!(
+                annotations
+                    .get(crate::resources::server_config::metrics::ANNOTATION_SCRAPE)
+                    .map(String::as_str),
+                Some("true")
+            );
+            assert_eq!(
+                annotations
+                    .get(crate::resources::server_config::metrics::ANNOTATION_PORT)
+                    .map(String::as_str),
+                Some(crate::resources::server_config::metrics::DEFAULT_PORT)
+            );
+        }
+        let yaml = config_map::tablet_server_yaml(&cluster).expect("same render must hold");
+        assert!(
+            yaml.contains("metrics.reporters: prometheus"),
+            "reporter key rendered by default, got:\n{yaml}"
+        );
+    }
+
+    #[test]
+    fn explicit_opt_out_removes_reporter_and_annotations() {
+        let mut cluster = spike_cluster();
+        cluster.spec.observability = Some(crate::api::ObservabilitySpec { prometheus: false });
+        let sts = desired_tablet_statefulset(&cluster, None).expect("valid CR must render");
+        let annotations = template_annotations(&sts);
+        assert!(
+            annotations
+                .get(crate::resources::server_config::metrics::ANNOTATION_SCRAPE)
+                .is_none(),
+            "opted-out pods must not advertise scraping"
+        );
+        let yaml = config_map::tablet_server_yaml(&cluster).expect("same render must hold");
+        assert!(
+            !yaml.contains("metrics.reporters:"),
+            "no reporter key when opted out, got:\n{yaml}"
+        );
+    }
+
+    #[test]
+    fn custom_reporter_port_reaches_the_annotations() {
+        let mut cluster = spike_cluster();
+        cluster.spec.configuration_overrides.insert(
+            crate::resources::server_config::metrics::PORT_KEY.to_string(),
+            "9250".to_string(),
+        );
+        let sts = desired_tablet_statefulset(&cluster, None).expect("valid CR must render");
+        assert_eq!(
+            template_annotations(&sts)
+                .get(crate::resources::server_config::metrics::ANNOTATION_PORT)
+                .map(String::as_str),
+            Some("9250"),
+            "user port override wins and stays consistent with scraping"
         );
     }
 }

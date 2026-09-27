@@ -376,8 +376,16 @@ pub struct TableDefaultsSpec {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ObservabilitySpec {
-    #[serde(default)]
+    /// Prometheus scrape wiring, default-on. `false` opts out: no reporter
+    /// key is rendered and no scrape annotations are injected.
+    #[serde(default = "default_true")]
+    #[schemars(default = "default_true")]
     pub prometheus: bool,
+}
+
+/// Serde/schemars default fn: observability is on unless opted out.
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -494,7 +502,7 @@ pub enum ConditionStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{FlussCluster, ScaleInPolicy};
+    use super::{FlussCluster, ObservabilitySpec, ScaleInPolicy};
     use kube::CustomResourceExt;
 
     #[test]
@@ -567,5 +575,15 @@ mod tests {
                 ScaleInPolicy::Block
             ));
         }
+    }
+
+    #[test]
+    fn observability_prometheus_defaults_to_true() {
+        let empty: ObservabilitySpec =
+            serde_yaml::from_str("{}").expect("empty observability must deserialize");
+        assert!(empty.prometheus, "absent flag means default-on");
+        let explicit: ObservabilitySpec =
+            serde_yaml::from_str("prometheus: false").expect("explicit false must deserialize");
+        assert!(!explicit.prometheus, "explicit opt-out must hold");
     }
 }

@@ -1782,7 +1782,11 @@ spec:
                 nullable: true
                 properties:
                   prometheus:
-                    default: false
+                    default: true
+                    description: 'Prometheus scrape wiring, default-on. `false` opts
+                      out: no reporter
+
+                      key is rendered and no scrape annotations are injected.'
                     type: boolean
                 type: object
               podDisruptionBudget:
@@ -3788,4 +3792,3 @@ spec:
     storage: true
     subresources:
       status: {}
-
