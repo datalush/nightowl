@@ -18,6 +18,7 @@ pub mod tablet_service;
 pub mod volume;
 
 use super::apply::ApplyOutcome;
+use super::fluss::TabletHealth;
 use crate::api::ClusterHealthStatus;
 
 /// A fact one step observed while converging.
@@ -62,6 +63,7 @@ pub enum Observation {
         coordinator_endpoints: Vec<String>,
         coordinator_ready: i32,
         tablet_uids: Vec<String>,
+        tablet_health: Vec<TabletHealth>,
     },
     FlussUnreachable {
         message: String,

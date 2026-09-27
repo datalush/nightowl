@@ -15,8 +15,8 @@ Conventions: **supported** (implemented and lab-verified), **blocked** (needs up
 | PVCs via `volumeClaimTemplates`, Retain/Retain, never auto-delete PVCs/S3/ZK | Supported | Verified; shrink and StorageClass change refused. |
 | Bootstrap order: config → coordinator → tablets → Ready | Supported | Verified, including restart idempotency. |
 | PDB `maxUnavailable: 0` on tablets; operator rolls via direct delete | Supported | Verified; PDB blocks eviction only, direct delete unaffected. |
-| Scale-in safety gate (refuse non-empty server) | Blocked | Gate exists and fails closed (scale-in of a non-empty server is refused), but the per-server replica count needs `describeTabletServers()`, which does not exist upstream (see below). |
-| Rolling upgrade: tablets first, per-server `serverGreen` gate, `Stalled` state | Blocked | Current order is coordinator-first (+1 only); per-server gating waits on the same missing read API. |
+| Scale-in safety gate (refuse non-empty server) | Blocked | Gate exists and fails closed; the per-server count now comes from `describeTabletServers()` on the fork image — wiring the gate to it is still pending. |
+| Rolling upgrade: tablets first, per-server `serverGreen` gate, `Stalled` state | Blocked | Current order is coordinator-first (+1 only); per-server `serverGreen` is readable from the fork image, gating on it is still pending. |
 | Dynamic vs restart-inducing config classification | Supported (partial) | Key ownership enforced, unknown keys fail closed; dynamic apply via Admin is pending. |
 | Rendered config content-hash driving restarts | Supported | Config hash in pod template; restarts only on real changes. |
 | Storage resize (expand in place, orphan-recreate for template) | Supported (partial) | Expansion verified live; shrink refused. Orphan-recreate path accepted but not yet orchestrated. |
@@ -36,7 +36,7 @@ Conventions: **supported** (implemented and lab-verified), **blocked** (needs up
 
 ## Direct answers required by the audit
 
-- **`describeTabletServers`**: does not exist in Fluss 1.0. Upstream asks are open ([apache/fluss#3743](https://github.com/apache/fluss/issues/3743), [apache/fluss#3570](https://github.com/apache/fluss/issues/3570)); tracked locally as the per-server health dependency. Until it lands, scale-in of non-empty servers and per-server upgrade gating stay refused with explicit reason.
+- **`describeTabletServers`**: does not exist in Fluss 1.0; implemented in our fork image (`1.0.0-midnattsol.1`, ApiKey 1067) and observed live in-cluster 2026-09-27 (3/3 servers with counters, cluster GREEN). Upstream asks stay open ([apache/fluss#3743](https://github.com/apache/fluss/issues/3743), [apache/fluss#3570](https://github.com/apache/fluss/issues/3570)). Scale-in of non-empty servers and per-server upgrade gating still stay refused until wired to it.
 - **`listServerTags`**: does not exist (FIP-41 states tags can be added/removed but not listed). No operator flow depends on it yet.
 - **Upgrade health signals**: cluster-wide `getClusterHealth()` exists and is used (GREEN/YELLOW/RED/UNKNOWN drives the `ClusterHealthy` condition). Per-server health does not exist — same gap as above. No auto-rollback exists anywhere by design.
 - **Drain mode / `decommissionServer` / min-ISR-aware rebalance**: none exist server-side; all deferred with adoption.
@@ -46,7 +46,7 @@ Conventions: **supported** (implemented and lab-verified), **blocked** (needs up
 | Capability | Server 1.0 | `fluss-rs` 1.0 | Operator use | Verdict |
 | --- | --- | --- | --- | --- |
 | `getClusterHealth` | Yes | `get_cluster_health` | `ClusterHealthy` condition | Supported |
-| `describeTabletServers` (per-server replicas/ISR/leaders) | No | No | Scale-in gate, `serverGreen` | Blocked |
+| `describeTabletServers` (per-server replicas/ISR/leaders) | No (stock) / Yes (fork image) | Yes (fork pin) | Observed into status; scale-in gate, `serverGreen` gating pending | Partial |
 | `listServerTags` | No | No | Rebalance bounding (v1beta1) | Blocked |
 | `addServerTag` / `removeServerTag` | Yes | Yes | Unused (never drive rebalance) | Available |
 | `rebalance` / `listRebalanceProgress` / `cancelRebalance` | Yes | Yes | Deliberately unused | Intentionally different |

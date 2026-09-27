@@ -50,7 +50,7 @@ Cuando el coordinator responde por el listener interno, el controlador rellena a
 
 Las sondas corren como mucho cada 60 segundos por clúster (límite en memoria, sin churn en `.status`); entre sondas valen los últimos valores observados. Un clúster inalcanzable reporta `FlussReachable=False` con la causa y deja `ClusterHealthy` en su valor previo — o ausente si nunca se observó. La observación de salud nunca bloquea la convergencia ni reintenta en caliente.
 
-Siguen ausentes hasta que exista la API Admin de lectura por servidor: `coordinator.activePod`, `assignedTablets` y `replicaHealth` por pod. Deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
+`assignedTablets` y `replicaHealth` por pod se rellenan cuando el servidor responde `DescribeTabletServers` (imagen del fork `1.0.0-midnattsol.1` en adelante, verificado en vivo 2026-09-27); `coordinator.activePod` sigue ausente. Contra Fluss 1.0 stock quedan ausentes mientras no exista, sin deducirse de que el pod esté listo.
 
 | Campo | Tipo | Significado |
 | --- | --- | --- |
@@ -67,6 +67,6 @@ Siguen ausentes hasta que exista la API Admin de lectura por servidor: `coordina
 
 Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. El esquema limita `status` a `"True"`, `"False"` y `"Unknown"`, y `type` a `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` y `OperationBlocked`. Hoy corren `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` y `OperationBlocked` (rechazos de config dinámica); el resto están planificadas.
 
-`getClusterHealth()` de Fluss 1.0 proporciona contadores globales. `assignedTablets` y `replicaHealth` por pod requieren la API Admin de lectura por servidor propuesta por FIP-41: deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
+`getClusterHealth()` de Fluss 1.0 proporciona contadores globales. `assignedTablets` y `replicaHealth` por pod requieren la API Admin de lectura por servidor: ausente upstream en 1.0, provista por la imagen del fork y observada en el status cuando el servidor responde; deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
 
 Un pod listo en Kubernetes no demuestra que Fluss esté saludable. `RemoteStorageReady=True` lleva evidencia de resolución de referencias (Secret referenciado con sus claves, o ServiceAccount, presentes) —no demuestra operaciones remotas; reiniciar o reducir servidores requiere algo más que una sonda TCP.

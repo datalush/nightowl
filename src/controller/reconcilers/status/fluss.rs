@@ -62,10 +62,14 @@ pub(super) fn fields(
     let tablet_servers = observations
         .iter()
         .find_map(|o| match o {
-            Observation::FlussHealth { tablet_uids, .. } => Some(TabletServersStatus {
+            Observation::FlussHealth {
+                tablet_uids,
+                tablet_health,
+                ..
+            } => Some(TabletServersStatus {
                 desired: cluster.spec.tablet_servers.replicas,
                 ready: tablet_uids.len() as i32,
-                pods: tablet_entries(tablet_uids),
+                pods: tablet_entries(tablet_uids, tablet_health),
             }),
             _ => None,
         })

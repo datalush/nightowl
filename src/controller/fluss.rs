@@ -13,7 +13,10 @@ use std::time::{Duration, Instant};
 
 use fluss::client::FlussConnection;
 use fluss::config::Config as FlussConfig;
-use fluss::metadata::{ClusterHealth as FlussHealthData, ClusterHealthStatus as FlussHealthState};
+use fluss::metadata::{
+    ClusterHealth as FlussHealthData, ClusterHealthStatus as FlussHealthState,
+    TabletServerHealth as FlussTabletHealth,
+};
 use fluss::{ServerNode, ServerType};
 
 use super::reconcilers::Observation;
@@ -68,6 +71,18 @@ pub struct HealthSnapshot {
     pub coordinator_endpoints: Vec<String>,
     pub coordinator_ready: i32,
     pub tablet_uids: Vec<String>,
+    pub tablet_health: Vec<TabletHealth>,
+}
+
+/// Per-server health slice, already joined to the membership uid: the
+/// four cluster counters scoped to one TabletServer. Absent when the
+/// server predates the `DescribeTabletServers` API (ApiKey 1067) —
+/// cluster health still reports, per-server fields stay unknown.
+#[derive(Clone, Debug)]
+pub struct TabletHealth {
+    pub uid: String,
+    pub assigned_tablets: i32,
+    pub replica: ReplicaHealth,
 }
 
 /// Probe the cluster when due; `None` means "keep standing values".
@@ -117,8 +132,14 @@ async fn round_trip(bootstrap: &str) -> Result<HealthSnapshot, fluss::error::Err
     let admin = connection.get_admin()?;
     let health = admin.get_cluster_health().await?;
     let servers = admin.get_server_nodes().await?;
+    // Best-effort: stock servers answer UnsupportedVersion, and then
+    // cluster health still reports while per-server fields stay unknown.
+    let per_server = admin
+        .describe_tablet_servers(vec![])
+        .await
+        .unwrap_or_default();
     connection.close(Duration::from_secs(1)).await.ok();
-    Ok(snapshot(&health, &servers))
+    Ok(snapshot(&health, &servers, &per_server))
 }
 
 fn snapshot_observations(snapshot: &HealthSnapshot) -> Observation {
@@ -127,23 +148,50 @@ fn snapshot_observations(snapshot: &HealthSnapshot) -> Observation {
         coordinator_endpoints: snapshot.coordinator_endpoints.clone(),
         coordinator_ready: snapshot.coordinator_ready,
         tablet_uids: snapshot.tablet_uids.clone(),
+        tablet_health: snapshot.tablet_health.clone(),
     }
 }
 
 /// Map wire types to our status types. Membership is Fluss-observed (who
 /// the coordinator sees), which is strictly more honest than pod Ready for
-/// "how many servers serve". Leader identity and per-tablet assignment stay
-/// absent: the membership API does not know them (erbh territory).
-fn snapshot(health: &FlussHealthData, servers: &[ServerNode]) -> HealthSnapshot {
+/// "how many servers serve". Leader identity stays absent: the membership
+/// API does not know it. Per-server replica counts ride along when the
+/// server answers `DescribeTabletServers`, joined by server id.
+fn snapshot(
+    health: &FlussHealthData,
+    servers: &[ServerNode],
+    per_server: &[FlussTabletHealth],
+) -> HealthSnapshot {
     let coordinators: Vec<String> = servers
         .iter()
         .filter(|node| matches!(node.server_type(), ServerType::CoordinatorServer))
         .map(|node| node.url())
         .collect();
-    let tablet_uids: Vec<String> = servers
+    let tablets: Vec<&ServerNode> = servers
         .iter()
         .filter(|node| matches!(node.server_type(), ServerType::TabletServer))
-        .map(|node| node.uid().to_string())
+        .collect();
+    let tablet_uids: Vec<String> = tablets.iter().map(|node| node.uid().to_string()).collect();
+    // Join by server id: `ts-{id}` is the client's own uid construction,
+    // so only membership-known servers ever populate. Describe entries
+    // for unknown ids (stale or foreign) are ignored, never invented.
+    let tablet_health: Vec<TabletHealth> = per_server
+        .iter()
+        .filter_map(|entry| {
+            tablets
+                .iter()
+                .find(|node| node.id() == entry.server_id)
+                .map(|node| TabletHealth {
+                    uid: node.uid().to_string(),
+                    assigned_tablets: entry.num_replicas,
+                    replica: ReplicaHealth {
+                        num_replicas: entry.num_replicas,
+                        in_sync_replicas: entry.in_sync_replicas,
+                        num_leader_replicas: entry.num_leader_replicas,
+                        active_leader_replicas: entry.active_leader_replicas,
+                    },
+                })
+        })
         .collect();
     HealthSnapshot {
         health: ClusterHealthStatus {
@@ -163,29 +211,35 @@ fn snapshot(health: &FlussHealthData, servers: &[ServerNode]) -> HealthSnapshot 
         coordinator_endpoints: coordinators.clone(),
         coordinator_ready: coordinators.len() as i32,
         tablet_uids,
+        tablet_health,
     }
 }
 
 /// Tablet status entries from observed membership: one per registered
-/// server, named by its Fluss uid. Assignment and replica health stay
-/// absent until the per-server read API exists.
-pub fn tablet_entries(uids: &[String]) -> Vec<TabletServerPodStatus> {
+/// server, named by its Fluss uid. Per-server counters ride along when
+/// the server answered `DescribeTabletServers`; otherwise they stay
+/// absent until observed.
+pub fn tablet_entries(uids: &[String], health: &[TabletHealth]) -> Vec<TabletServerPodStatus> {
     uids.iter()
-        .map(|uid| TabletServerPodStatus {
-            name: uid.clone(),
-            ready: true,
-            assigned_tablets: None,
-            replica_health: None,
+        .map(|uid| {
+            let detail = health.iter().find(|h| &h.uid == uid);
+            TabletServerPodStatus {
+                name: uid.clone(),
+                ready: true,
+                assigned_tablets: detail.map(|h| h.assigned_tablets),
+                replica_health: detail.map(|h| h.replica.clone()),
+            }
         })
         .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::snapshot;
+    use super::{snapshot, tablet_entries};
     use crate::api::ClusterHealthState;
     use fluss::metadata::{
         ClusterHealth as FlussHealthData, ClusterHealthStatus as FlussHealthState,
+        TabletServerHealth as FlussTabletHealth,
     };
     use fluss::{ServerNode, ServerType};
 
@@ -203,6 +257,22 @@ mod tests {
         ServerNode::new(id, format!("host-{id}"), 9123 + id as u32, server_type)
     }
 
+    fn per_server(
+        server_id: i32,
+        num_replicas: i32,
+        in_sync_replicas: i32,
+        num_leader_replicas: i32,
+        active_leader_replicas: i32,
+    ) -> FlussTabletHealth {
+        FlussTabletHealth {
+            server_id,
+            num_replicas,
+            in_sync_replicas,
+            num_leader_replicas,
+            active_leader_replicas,
+        }
+    }
+
     #[test]
     fn green_maps_with_membership() {
         let servers = vec![
@@ -210,7 +280,7 @@ mod tests {
             node(0, ServerType::TabletServer),
             node(1, ServerType::TabletServer),
         ];
-        let snapshot = snapshot(&health(FlussHealthState::Green), &servers);
+        let snapshot = snapshot(&health(FlussHealthState::Green), &servers, &[]);
         assert!(matches!(snapshot.health.status, ClusterHealthState::Green));
         assert_eq!(snapshot.health.replicas.num_replicas, 6);
         assert_eq!(snapshot.coordinator_ready, 1);
@@ -222,6 +292,10 @@ mod tests {
             snapshot.tablet_uids,
             vec!["ts-0".to_string(), "ts-1".to_string()]
         );
+        assert!(
+            snapshot.tablet_health.is_empty(),
+            "no describe answer means unknown per-server health, not zeros"
+        );
     }
 
     #[test]
@@ -231,11 +305,55 @@ mod tests {
             (FlussHealthState::Red, ClusterHealthState::Red),
             (FlussHealthState::Unknown, ClusterHealthState::Unknown),
         ] {
-            let snapshot = snapshot(&health(input), &[]);
+            let snapshot = snapshot(&health(input), &[], &[]);
             assert_eq!(
                 std::mem::discriminant(&snapshot.health.status),
                 std::mem::discriminant(&_expected)
             );
         }
+    }
+
+    #[test]
+    fn per_server_health_joins_membership_by_id() {
+        let servers = vec![
+            node(0, ServerType::CoordinatorServer),
+            node(0, ServerType::TabletServer),
+            node(2, ServerType::TabletServer),
+        ];
+        let describe = vec![
+            per_server(0, 4, 4, 2, 2),
+            per_server(2, 4, 3, 2, 1),
+            per_server(9, 1, 1, 0, 0),
+        ];
+        let snapshot = snapshot(&health(FlussHealthState::Yellow), &servers, &describe);
+        assert_eq!(snapshot.tablet_health.len(), 2);
+        assert_eq!(snapshot.tablet_health[0].uid, "ts-0");
+        assert_eq!(snapshot.tablet_health[0].assigned_tablets, 4);
+        assert_eq!(snapshot.tablet_health[0].replica.in_sync_replicas, 4);
+        assert_eq!(snapshot.tablet_health[1].uid, "ts-2");
+        assert_eq!(snapshot.tablet_health[1].replica.active_leader_replicas, 1);
+
+        let entries = tablet_entries(&snapshot.tablet_uids, &snapshot.tablet_health);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].assigned_tablets, Some(4));
+        assert_eq!(
+            entries[0]
+                .replica_health
+                .as_ref()
+                .expect("joined")
+                .num_replicas,
+            4
+        );
+        assert_eq!(entries[1].assigned_tablets, Some(4));
+    }
+
+    #[test]
+    fn members_missing_from_describe_stay_unknown() {
+        let servers = vec![node(0, ServerType::TabletServer)];
+        let snapshot = snapshot(&health(FlussHealthState::Green), &servers, &[]);
+        let entries = tablet_entries(&snapshot.tablet_uids, &snapshot.tablet_health);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].assigned_tablets, None);
+        assert_eq!(entries[0].replica_health, None);
     }
 }

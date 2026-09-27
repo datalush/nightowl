@@ -50,7 +50,7 @@ When the coordinator answers over the internal listener, the controller also fil
 
 Probes run at most every 60 seconds per cluster (in-memory rate limit, no status churn); between probes the last observed values stand. An unreachable cluster reports `FlussReachable=False` with the cause and leaves `ClusterHealthy` at its previous value — or absent when never observed. Health observation never blocks convergence and never retries hot.
 
-Still absent until the per-server Admin read API exists: `coordinator.activePod`, per-pod `assignedTablets` and `replicaHealth`. They must remain absent while unavailable, not be invented from Pod readiness.
+Per-pod `assignedTablets` and `replicaHealth` populate when the server answers `DescribeTabletServers` (fork image `1.0.0-midnattsol.1` and later, verified live 2026-09-27); `coordinator.activePod` stays absent. Against stock Fluss 1.0 they remain absent while unavailable, never invented from Pod readiness.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -67,6 +67,6 @@ Still absent until the per-server Admin read API exists: `coordinator.activePod`
 
 Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`; `type` is also an enum: `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, or `OperationBlocked`. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` and `OperationBlocked` (dynamic-config rejections) run today; the rest are planned.
 
-Fluss 1.0's `getClusterHealth()` supports global counters. The per-pod `assignedTablets` and `replicaHealth` fields require the proposed per-server Admin read API; they must remain absent while unavailable, not be invented from Pod readiness.
+Fluss 1.0's `getClusterHealth()` supports global counters. The per-pod `assignedTablets` and `replicaHealth` fields require the per-server Admin read API: absent upstream in 1.0, provided by the fork image and observed into status when the server answers; they must remain absent while unavailable, not be invented from Pod readiness.
 
 Kubernetes Pod readiness alone does not prove Fluss health. `RemoteStorageReady=True` carries reference-resolution evidence (referenced Secret with its keys, or ServiceAccount, present) — it does not assert remote operations, and any decision to restart or scale in needs stronger Fluss-specific evidence than a TCP probe.

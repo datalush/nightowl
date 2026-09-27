@@ -15,8 +15,8 @@ Convenciones: **soportado** (implementado y verificado en lab), **bloqueado** (p
 | PVCs vía `volumeClaimTemplates`, Retain/Retain, jamás auto-borrar PVCs/S3/ZK | Soportado | Verificado; shrink y cambio de StorageClass rechazados. |
 | Orden de arranque: config → coordinator → tablets → Ready | Soportado | Verificado, incluida idempotencia ante reinicios. |
 | PDB `maxUnavailable: 0` en tablets; el operador rota por borrado directo | Soportado | Verificado; el PDB solo frena evictions, no el borrado directo. |
-| Gate de scale-in (rechazar servidor no vacío) | Bloqueado | El gate existe y falla cerrado (se rechaza el scale-in de un servidor no vacío), pero el conteo por servidor necesita `describeTabletServers()`, que no existe upstream (ver abajo). |
-| Rolling upgrade: tablets primero, gate `serverGreen` por servidor, estado `Stalled` | Bloqueado | El orden actual es coordinator primero (+1 solo); el gate por servidor espera la misma API de lectura ausente. |
+| Gate de scale-in (rechazar servidor no vacío) | Bloqueado | El gate existe y falla cerrado; el conteo por servidor ya viene de `describeTabletServers()` en la imagen del fork — cablear el gate sigue pendiente. |
+| Rolling upgrade: tablets primero, gate `serverGreen` por servidor, estado `Stalled` | Bloqueado | El orden actual es coordinator primero (+1 solo); el `serverGreen` por servidor ya se lee de la imagen del fork, el gate sigue pendiente. |
 | Clasificación de config dinámica vs con restart | Soportado (parcial) | Propiedad de claves forzada, claves desconocidas fallan cerrado; aplicar dinámicas vía Admin está pendiente. |
 | Hash de la config renderizada dirigiendo restarts | Soportado | Hash de config en el pod template; restarts solo ante cambios reales. |
 | Resize de almacenamiento (expandir in place, orphan-recreate para la plantilla) | Soportado (parcial) | Expansión verificada en vivo; shrink rechazado. El path orphan-recreate está aceptado pero sin orquestar. |
@@ -36,7 +36,7 @@ Convenciones: **soportado** (implementado y verificado en lab), **bloqueado** (p
 
 ## Respuestas directas que pide la auditoría
 
-- **`describeTabletServers`**: no existe en Fluss 1.0. Las peticiones upstream están abiertas ([apache/fluss#3743](https://github.com/apache/fluss/issues/3743), [apache/fluss#3570](https://github.com/apache/fluss/issues/3570)); seguido localmente como la dependencia de salud por servidor. Hasta que llegue, el scale-in de servidores no vacíos y el gate de upgrade por servidor quedan rechazados con motivo explícito.
+- **`describeTabletServers`**: no existe en Fluss 1.0; implementado en nuestra imagen del fork (`1.0.0-midnattsol.1`, ApiKey 1067) y observado en vivo en el clúster el 2026-09-27 (3/3 servidores con contadores, clúster GREEN). Las peticiones upstream siguen abiertas ([apache/fluss#3743](https://github.com/apache/fluss/issues/3743), [apache/fluss#3570](https://github.com/apache/fluss/issues/3570)). El scale-in de servidores no vacíos y el gate de upgrade por servidor siguen rechazados hasta cablearse.
 - **`listServerTags`**: no existe (la propia FIP-41 dice que los tags se añaden/quitan pero no se listan). Ningún flujo del operador depende aún de ello.
 - **Señales de salud para upgrade**: `getClusterHealth()` de clúster existe y se usa (GREEN/YELLOW/RED/UNKNOWN dirige la condición `ClusterHealthy`). La salud por servidor no existe —el mismo hueco de arriba. No hay auto-rollback en ningún sitio, por diseño.
 - **Drain mode / `decommissionServer` / rebalance min-ISR-aware**: nada existe en el servidor; todo diferido con la adopción.
@@ -46,7 +46,7 @@ Convenciones: **soportado** (implementado y verificado en lab), **bloqueado** (p
 | Capacidad | Servidor 1.0 | `fluss-rs` 1.0 | Uso del operador | Veredicto |
 | --- | --- | --- | --- | --- |
 | `getClusterHealth` | Sí | `get_cluster_health` | Condición `ClusterHealthy` | Soportado |
-| `describeTabletServers` (réplicas/ISR/líderes por servidor) | No | No | Gate de scale-in, `serverGreen` | Bloqueado |
+| `describeTabletServers` (réplicas/ISR/líderes por servidor) | No (stock) / Sí (imagen fork) | Sí (pin fork) | Observado en el status; gate de scale-in y `serverGreen` pendientes | Parcial |
 | `listServerTags` | No | No | Acotar rebalance (v1beta1) | Bloqueado |
 | `addServerTag` / `removeServerTag` | Sí | Sí | Sin usar (jamás dirigir rebalance) | Disponible |
 | `rebalance` / `listRebalanceProgress` / `cancelRebalance` | Sí | Sí | Deliberadamente sin usar | Deliberadamente distinto |
