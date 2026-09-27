@@ -15,7 +15,7 @@ Convenciones: **soportado** (implementado y verificado en lab), **bloqueado** (p
 | PVCs vía `volumeClaimTemplates`, Retain/Retain, jamás auto-borrar PVCs/S3/ZK | Soportado | Verificado; shrink y cambio de StorageClass rechazados. |
 | Orden de arranque: config → coordinator → tablets → Ready | Soportado | Verificado, incluida idempotencia ante reinicios. |
 | PDB `maxUnavailable: 0` en tablets; el operador rota por borrado directo | Soportado | Verificado; el PDB solo frena evictions, no el borrado directo. |
-| Gate de scale-in (rechazar servidor no vacío) | Bloqueado | El gate existe y falla cerrado; el conteo por servidor ya viene de `describeTabletServers()` en la imagen del fork — cablear el gate sigue pendiente. |
+| Gate de scale-in (rechazar servidor no vacío) | Soportado (parcial) | El gate consulta lectura fresca por servidor (imagen fork): registrado-y-vacío converge, lo demás falla cerrado con el motivo exacto. Workflow vivo de borrado pendiente en `g8qz`. |
 | Rolling upgrade: tablets primero, gate `serverGreen` por servidor, estado `Stalled` | Bloqueado | El orden actual es coordinator primero (+1 solo); el `serverGreen` por servidor ya se lee de la imagen del fork, el gate sigue pendiente. |
 | Clasificación de config dinámica vs con restart | Soportado (parcial) | Propiedad de claves forzada, claves desconocidas fallan cerrado; aplicar dinámicas vía Admin está pendiente. |
 | Hash de la config renderizada dirigiendo restarts | Soportado | Hash de config en el pod template; restarts solo ante cambios reales. |

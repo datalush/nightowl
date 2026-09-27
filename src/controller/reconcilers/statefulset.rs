@@ -24,7 +24,10 @@ use crate::api::FlussCluster;
 use crate::constants::{COORDINATOR_STATEFULSET_SUFFIX, TABLET_STATEFULSET_SUFFIX};
 use crate::controller::Error;
 use crate::controller::apply;
+use crate::controller::fluss as fluss_probe;
 use crate::resources::statefulset as builder;
+use fluss::metadata::TabletServerHealth as FlussTabletHealth;
+use fluss::{ServerNode, ServerType};
 
 /// Converge both StatefulSets toward the desired state.
 ///
@@ -312,9 +315,10 @@ async fn converge_one(
             });
         }
     };
-    // Fail-closed scale-in: the only policy is Block, and emptiness is not
-    // observable until the per-server read API exists (erbh). A decrement
-    // therefore never converges — it reports instead. Scale-out flows
+    // Fail-closed scale-in: the only policy is Block, so a decrement
+    // converges only when a fresh per-server read proves every outgoing
+    // server registered and empty. Anything else — non-empty, unregistered,
+    // unobservable — reports instead of converging. Scale-out flows
     // through untouched.
     if matches!(role, Role::Tablet) {
         let wanted = desired
@@ -330,12 +334,17 @@ async fn converge_one(
         if let Some(live_replicas) = live_replicas
             && wanted < live_replicas
         {
-            return Ok(Observation::StatefulSetBlocked {
-                name: name.clone(),
-                message: format!(
-                    "refusing to scale tabletservers from {live_replicas} down to {wanted}: scale-in policy is Block and hosted replicas are not observable yet"
-                ),
-            });
+            match tablet_scale_in_allowed(cluster, live_replicas, wanted).await {
+                Ok(()) => {}
+                Err(reason) => {
+                    return Ok(Observation::StatefulSetBlocked {
+                        name: name.clone(),
+                        message: format!(
+                            "refusing to scale tabletservers from {live_replicas} down to {wanted}: {reason}"
+                        ),
+                    });
+                }
+            }
         }
     }
     match apply::apply(api, desired, uid, same_statefulset).await {
@@ -348,6 +357,64 @@ async fn converge_one(
         }),
         Err(e) => Err(e),
     }
+}
+
+/// Decide whether a tablet scale-in may converge. The read is fresh by
+/// construction — taken on the decrement path, never from standing status —
+/// because terminating a pod on minute-old data would be guessing.
+async fn tablet_scale_in_allowed(
+    cluster: &FlussCluster,
+    live_replicas: i32,
+    wanted: i32,
+) -> Result<(), String> {
+    let bootstrap = match fluss_probe::bootstrap_address(cluster) {
+        Some(address) => address,
+        None => {
+            return Err("cluster cannot be addressed for a per-server read".to_string());
+        }
+    };
+    let (servers, per_server) = fluss_probe::fresh_server_reads(&bootstrap).await?;
+    scale_in_verdict(live_replicas, wanted, &servers, &per_server)
+}
+
+/// Pure decision over a fresh read. Outgoing tail ordinals
+/// `[wanted..live)` map to server ids (`tablet-server.id` derives from the
+/// ordinal). Every outgoing server must be registered AND host zero
+/// replicas; anything else refuses with the exact blocker. Note the
+/// fail-safe direction: the fork reports zeros for unknown servers, so
+/// registration is checked first — zeros from a server we cannot see
+/// prove nothing.
+fn scale_in_verdict(
+    live_replicas: i32,
+    wanted: i32,
+    servers: &[ServerNode],
+    per_server: &[FlussTabletHealth],
+) -> Result<(), String> {
+    for ordinal in wanted..live_replicas {
+        let registered = servers.iter().any(|node| {
+            node.id() == ordinal && matches!(node.server_type(), ServerType::TabletServer)
+        });
+        if !registered {
+            return Err(format!(
+                "tablet server ts-{ordinal} is not registered; emptiness is unprovable"
+            ));
+        }
+        match per_server.iter().find(|entry| entry.server_id == ordinal) {
+            Some(entry) if entry.num_replicas == 0 => {}
+            Some(entry) => {
+                return Err(format!(
+                    "tablet server ts-{ordinal} still hosts {} replicas",
+                    entry.num_replicas
+                ));
+            }
+            None => {
+                return Err(format!(
+                    "no per-server health for ts-{ordinal}; emptiness is unprovable"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// StatefulSets are the same when the fields the controller manages agree.
@@ -743,5 +810,94 @@ mod tests {
             same_statefulset(&desired, &rotated),
             "pin-only change must not read as drift"
         );
+    }
+
+    mod scale_in {
+        use super::super::scale_in_verdict;
+        use fluss::metadata::TabletServerHealth as FlussTabletHealth;
+        use fluss::{ServerNode, ServerType};
+
+        fn tablet(id: i32) -> ServerNode {
+            ServerNode::new(id, format!("host-{id}"), 9123, ServerType::TabletServer)
+        }
+
+        fn coordinator(id: i32) -> ServerNode {
+            ServerNode::new(
+                id,
+                format!("host-{id}"),
+                9123,
+                ServerType::CoordinatorServer,
+            )
+        }
+
+        fn health(server_id: i32, num_replicas: i32) -> FlussTabletHealth {
+            FlussTabletHealth {
+                server_id,
+                num_replicas,
+                in_sync_replicas: num_replicas,
+                num_leader_replicas: 0,
+                active_leader_replicas: 0,
+            }
+        }
+
+        #[test]
+        fn registered_empty_tail_may_go() {
+            let servers = vec![tablet(0), tablet(1), tablet(2), coordinator(0)];
+            let per_server = vec![health(0, 4), health(1, 0), health(2, 0)];
+            assert!(
+                scale_in_verdict(3, 1, &servers, &per_server).is_ok(),
+                "outgoing ts-1 and ts-2 are registered and empty"
+            );
+        }
+
+        #[test]
+        fn non_empty_outgoing_refuses_with_count() {
+            let servers = vec![tablet(0), tablet(1), tablet(2)];
+            let per_server = vec![health(0, 4), health(1, 0), health(2, 3)];
+            let err = scale_in_verdict(3, 1, &servers, &per_server)
+                .expect_err("ts-2 still hosts replicas");
+            assert!(
+                err.contains("ts-2") && err.contains('3'),
+                "blocker names the server and its count, got: {err}"
+            );
+        }
+
+        #[test]
+        fn unregistered_outgoing_refuses_even_with_zeros() {
+            // The fork reports zeros for unknown servers per the FIP-41
+            // fail-safe: zeros without registration prove nothing.
+            let servers = vec![tablet(0), tablet(1)];
+            let per_server = vec![health(0, 0), health(1, 0), health(2, 0)];
+            let err =
+                scale_in_verdict(3, 2, &servers, &per_server).expect_err("ts-2 is not registered");
+            assert!(
+                err.contains("ts-2") && err.contains("not registered"),
+                "blocker says unprovable, got: {err}"
+            );
+        }
+
+        #[test]
+        fn missing_describe_entry_refuses() {
+            let servers = vec![tablet(0), tablet(1)];
+            let per_server = vec![health(0, 0)];
+            let err =
+                scale_in_verdict(2, 1, &servers, &per_server).expect_err("no health for ts-1");
+            assert!(
+                err.contains("ts-1") && err.contains("unprovable"),
+                "blocker says unprovable, got: {err}"
+            );
+        }
+
+        #[test]
+        fn no_decrement_needs_nothing() {
+            assert!(
+                scale_in_verdict(2, 2, &[], &[]).is_ok(),
+                "wanted == live reads no servers"
+            );
+            assert!(
+                scale_in_verdict(2, 3, &[], &[]).is_ok(),
+                "scale-out never consults the gate"
+            );
+        }
     }
 }

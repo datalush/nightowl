@@ -142,6 +142,35 @@ async fn round_trip(bootstrap: &str) -> Result<HealthSnapshot, fluss::error::Err
     Ok(snapshot(&health, &servers, &per_server))
 }
 
+/// Fresh membership plus per-server reads for destructive decisions
+/// (scale-in): both RPCs strict, sharing one bounded round-trip. Any
+/// failure — unreachable, unsupported API, timeout — errors so the caller
+/// fails closed. Unlike the best-effort probe, nothing here is optional.
+pub(crate) async fn fresh_server_reads(
+    bootstrap: &str,
+) -> Result<(Vec<ServerNode>, Vec<FlussTabletHealth>), String> {
+    async fn read(
+        bootstrap: &str,
+    ) -> Result<(Vec<ServerNode>, Vec<FlussTabletHealth>), fluss::error::Error> {
+        let config = FlussConfig {
+            bootstrap_servers: bootstrap.to_string(),
+            connect_timeout_ms: CONNECT_TIMEOUT_MS,
+            ..Default::default()
+        };
+        let connection = FlussConnection::new(config).await?;
+        let admin = connection.get_admin()?;
+        let servers = admin.get_server_nodes().await?;
+        let per_server = admin.describe_tablet_servers(vec![]).await?;
+        connection.close(Duration::from_secs(1)).await.ok();
+        Ok((servers, per_server))
+    }
+    match tokio::time::timeout(PROBE_TIMEOUT, read(bootstrap)).await {
+        Ok(Ok(reads)) => Ok(reads),
+        Ok(Err(e)) => Err(format!("per-server read failed: {e}")),
+        Err(_) => Err(format!("per-server read exceeded {PROBE_TIMEOUT:?}")),
+    }
+}
+
 fn snapshot_observations(snapshot: &HealthSnapshot) -> Observation {
     Observation::FlussHealth {
         health: snapshot.health.clone(),

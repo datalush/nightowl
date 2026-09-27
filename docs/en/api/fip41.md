@@ -15,7 +15,7 @@ Conventions: **supported** (implemented and lab-verified), **blocked** (needs up
 | PVCs via `volumeClaimTemplates`, Retain/Retain, never auto-delete PVCs/S3/ZK | Supported | Verified; shrink and StorageClass change refused. |
 | Bootstrap order: config → coordinator → tablets → Ready | Supported | Verified, including restart idempotency. |
 | PDB `maxUnavailable: 0` on tablets; operator rolls via direct delete | Supported | Verified; PDB blocks eviction only, direct delete unaffected. |
-| Scale-in safety gate (refuse non-empty server) | Blocked | Gate exists and fails closed; the per-server count now comes from `describeTabletServers()` on the fork image — wiring the gate to it is still pending. |
+| Scale-in safety gate (refuse non-empty server) | Supported (partial) | Gate consults a fresh per-server read (fork image): registered-and-empty converges, anything else fails closed with the exact blocker. Live removal workflow pending in `g8qz`. |
 | Rolling upgrade: tablets first, per-server `serverGreen` gate, `Stalled` state | Blocked | Current order is coordinator-first (+1 only); per-server `serverGreen` is readable from the fork image, gating on it is still pending. |
 | Dynamic vs restart-inducing config classification | Supported (partial) | Key ownership enforced, unknown keys fail closed; dynamic apply via Admin is pending. |
 | Rendered config content-hash driving restarts | Supported | Config hash in pod template; restarts only on real changes. |
