@@ -59,3 +59,24 @@ Retira ambas al terminar (`ip route del`, borrar las líneas de hosts). Los fall
 | Almacenamiento remoto | RustFS 1.0.0 externo (hardware del lab, fuera de banda) |
 
 Refresca esta tabla cada vez que el lab se mueva. El namespace `fluss` de referencia es una instalación Helm fija para comparar; los tests del operador corren exclusivamente en `operator-dev`.
+
+## Métricas del lab (Prometheus)
+
+Un Prometheus mínimo (`prom/prometheus:v3.5.0`, Deployment + Service en el namespace `monitoring`, manifiestos fuera de este repo) scrapea los pods Fluss por discovery filtrado con las anotaciones `prometheus.io/scrape=true` y `prometheus.io/port=9249`. El reporter se activa por clúster con la API existente —sin cambios en el operador:
+
+```yaml
+configurationOverrides:
+  metrics.reporters: prometheus
+coordinator:
+  podTemplate:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9249"
+tabletServers:
+  podTemplate:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9249"
+```
+
+El job (`fluss-pods`) solo conserva targets del puerto 9249 y reescribe `__address__` a IP-de-pod:9249. Verificado el 2026-09-27: 3/3 pods `up`, 1131 series `fluss_*` queryables, gauges del coordinator reflejando el test vivo (`activeTabletServerCount=2`, `tableCount=1`). Tras editar el ConfigMap de scrape, recargar con `POST /-/reload` (el volumen puede tardar ~1 min en sincronizar). Nota: el chart `prometheus` de Bitnami resultó inutilizable (su tag de imagen fijado no resuelve); los manifiestos escritos a mano son el fixture del lab.
