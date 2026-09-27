@@ -101,36 +101,112 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
         tracing::info!(cluster = %name, "updated FlussCluster status");
     }
 
-    if let Some(svc) = observations.iter().find_map(Observation::blocked_service) {
-        return Err(Error::NotOwned(svc.to_string()));
-    }
-    if let Some((_, message)) = observations.iter().find_map(Observation::blocked_config) {
-        return Err(Error::InvalidConfig(message.to_string()));
-    }
-    if let Some((name, _)) = observations
-        .iter()
-        .find_map(Observation::blocked_statefulset)
-    {
-        return Err(Error::NotOwnedResource {
-            kind: "statefulset".to_string(),
-            name: name.to_string(),
-        });
-    }
-    if let Some((name, _)) = observations.iter().find_map(Observation::blocked_pdb) {
-        return Err(Error::NotOwnedResource {
-            kind: "poddisruptionbudget".to_string(),
-            name: name.to_string(),
-        });
-    }
-    if let Some((_, message)) = observations.iter().find_map(Observation::blocked_volume) {
-        return Err(Error::InvalidConfig(message.to_string()));
-    }
-    if let Some(message) = observations.iter().find_map(Observation::blocked_guardrail) {
-        return Err(Error::InvalidConfig(message.to_string()));
+    if let Some(error) = terminal_error(&observations) {
+        return Err(error);
     }
     // Periodic resync: Secret rotation changes no watched object, so without
     // a heartbeat the staleness detector would sleep until the next
     // unrelated event. Steady state is write-free, so the cost is a few
     // reads per minute per cluster.
     Ok(Action::requeue(Duration::from_secs(60)))
+}
+
+/// Translate block observations into pass-ending errors, preserving
+/// priority order: static blocks park on the next watch event, while
+/// blocks awaiting external change retry on a timer (see `error_policy`).
+fn terminal_error(observations: &[Observation]) -> Option<Error> {
+    if let Some(svc) = observations.iter().find_map(Observation::blocked_service) {
+        return Some(Error::NotOwned(svc.to_string()));
+    }
+    if let Some((_, message)) = observations.iter().find_map(Observation::blocked_config) {
+        return Some(Error::InvalidConfig(message.to_string()));
+    }
+    if let Some((name, _)) = observations
+        .iter()
+        .find_map(Observation::blocked_statefulset)
+    {
+        return Some(Error::NotOwnedResource {
+            kind: "statefulset".to_string(),
+            name: name.to_string(),
+        });
+    }
+    if let Some((name, message)) = observations
+        .iter()
+        .find_map(Observation::blocked_awaiting_external)
+    {
+        return Some(Error::RetryableBlock {
+            name: name.to_string(),
+            message: message.to_string(),
+        });
+    }
+    if let Some((name, _)) = observations.iter().find_map(Observation::blocked_pdb) {
+        return Some(Error::NotOwnedResource {
+            kind: "poddisruptionbudget".to_string(),
+            name: name.to_string(),
+        });
+    }
+    if let Some((_, message)) = observations.iter().find_map(Observation::blocked_volume) {
+        return Some(Error::InvalidConfig(message.to_string()));
+    }
+    if let Some(message) = observations.iter().find_map(Observation::blocked_guardrail) {
+        return Some(Error::InvalidConfig(message.to_string()));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::terminal_error;
+    use super::{Error, Observation};
+
+    fn blocked_sts() -> Observation {
+        Observation::StatefulSetBlocked {
+            name: "tablet".to_string(),
+            message: "foreign owner".to_string(),
+        }
+    }
+
+    fn awaiting_external() -> Observation {
+        Observation::StatefulSetAwaitingExternal {
+            name: "tablet".to_string(),
+            message: "ts-2 still hosts 1 replicas".to_string(),
+        }
+    }
+
+    #[test]
+    fn static_statefulset_block_parks() {
+        match terminal_error(&[blocked_sts()]) {
+            Some(Error::NotOwnedResource { kind, name }) => {
+                assert_eq!(kind, "statefulset");
+                assert_eq!(name, "tablet");
+            }
+            other => panic!("static block must park, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn awaiting_external_block_retries() {
+        match terminal_error(&[awaiting_external()]) {
+            Some(Error::RetryableBlock { name, message }) => {
+                assert_eq!(name, "tablet");
+                assert!(message.contains("ts-2"), "reason rides along: {message}");
+            }
+            other => panic!("dynamic block must retry, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn static_block_wins_over_retryable() {
+        // Priority order preserved: a foreign owner parks even when the
+        // gate also refuses.
+        match terminal_error(&[awaiting_external(), blocked_sts()]) {
+            Some(Error::NotOwnedResource { .. }) => {}
+            other => panic!("static block must win, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn no_block_means_no_error() {
+        assert!(terminal_error(&[]).is_none());
+    }
 }

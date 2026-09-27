@@ -47,6 +47,15 @@ pub enum Observation {
         name: String,
         message: String,
     },
+    /// A StatefulSet block whose cause lives outside Kubernetes and can
+    /// clear with no watch event (today: the scale-in gate refusal, where
+    /// Fluss emptiness changes on its own). Reported exactly like
+    /// [`Observation::StatefulSetBlocked`] but retried on a timer instead
+    /// of parked on `await_change`.
+    StatefulSetAwaitingExternal {
+        name: String,
+        message: String,
+    },
     WaitingForCoordinator {
         name: String,
     },
@@ -149,6 +158,15 @@ impl Observation {
     pub fn blocked_statefulset(&self) -> Option<(&str, &str)> {
         match self {
             Observation::StatefulSetBlocked { name, message } => Some((name, message)),
+            _ => None,
+        }
+    }
+
+    /// Name and message of a StatefulSet block awaiting an external
+    /// change, if any. Retried on a timer; never parked silently.
+    pub fn blocked_awaiting_external(&self) -> Option<(&str, &str)> {
+        match self {
+            Observation::StatefulSetAwaitingExternal { name, message } => Some((name, message)),
             _ => None,
         }
     }

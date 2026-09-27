@@ -337,7 +337,10 @@ async fn converge_one(
             match tablet_scale_in_allowed(cluster, live_replicas, wanted).await {
                 Ok(()) => {}
                 Err(reason) => {
-                    return Ok(Observation::StatefulSetBlocked {
+                    // Awaiting-external, not statically blocked: emptiness
+                    // changes in Fluss with no watch event, so this refusal
+                    // retries on a timer instead of parking on await_change.
+                    return Ok(Observation::StatefulSetAwaitingExternal {
                         name: name.clone(),
                         message: format!(
                             "refusing to scale tabletservers from {live_replicas} down to {wanted}: {reason}"

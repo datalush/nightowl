@@ -40,7 +40,10 @@ pub(super) fn condition_tuple(
     }
 
     if let Some((name, message)) = observations.iter().find_map(|o| match o {
-        Observation::StatefulSetBlocked { name, message } => Some((name.clone(), message.clone())),
+        Observation::StatefulSetBlocked { name, message }
+        | Observation::StatefulSetAwaitingExternal { name, message } => {
+            Some((name.clone(), message.clone()))
+        }
         _ => None,
     }) {
         return (

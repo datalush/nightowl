@@ -39,6 +39,8 @@ pub enum Error {
     NotOwned(String),
     #[error("{kind} {name} exists with a different owner; refusing to adopt it")]
     NotOwnedResource { kind: String, name: String },
+    #[error("statefulset {name} blocked awaiting external change ({message}); retrying")]
+    RetryableBlock { name: String, message: String },
     #[error("invalid config: {0}")]
     InvalidConfig(String),
     #[error("kubernetes api error: {0}")]
@@ -49,15 +51,24 @@ pub enum Error {
 ///
 /// Static user errors (a conflicting owner, an invalid config) will not
 /// resolve themselves by retrying, so they wait for the next watch event
-/// instead of hot-looping. API rejections (the apiserver refusing an
-/// invalid or forbidden write) are static the same way. Only genuinely
+/// instead of hot-looping. Blocks awaiting external change (today: the
+/// scale-in gate, whose cause clears in Fluss with no watch event) requeue
+/// on [`BLOCKED_RETRY_AFTER`] instead — parking them would leave status
+/// stale until an unrelated event. API rejections (the apiserver refusing
+/// an invalid or forbidden write) are static the same way. Only genuinely
 /// transient API errors requeue with a fixed delay.
+const BLOCKED_RETRY_AFTER: Duration = Duration::from_secs(60);
+
 fn error_policy(cluster: Arc<FlussCluster>, error: &Error, _ctx: Arc<Context>) -> Action {
     let name = cluster.metadata.name.as_deref().unwrap_or("<no-name>");
     match error {
         Error::NotOwned(_) | Error::NotOwnedResource { .. } | Error::InvalidConfig(_) => {
             tracing::error!(cluster = %name, error = %error, "reconcile blocked");
             Action::await_change()
+        }
+        Error::RetryableBlock { .. } => {
+            tracing::warn!(cluster = %name, error = %error, "reconcile blocked, retrying");
+            Action::requeue(BLOCKED_RETRY_AFTER)
         }
         Error::Kube(kube::Error::Api(status))
             if matches!(status.code, 400 | 403 | 404 | 405 | 409 | 422) =>
