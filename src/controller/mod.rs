@@ -134,7 +134,7 @@ mod deploy_tests {
             serde_yaml::from_str(include_str!("../../deploy/clusterrole.yaml"))
                 .expect("clusterrole must parse");
         let rules = role.rules.expect("clusterrole needs rules");
-        assert_eq!(rules.len(), 8, "one rule per row of the verb matrix");
+        assert_eq!(rules.len(), 10, "one rule per row of the verb matrix");
 
         let mut remaining: Vec<(Vec<String>, Vec<String>, Vec<String>)> = rules
             .iter()
@@ -160,12 +160,28 @@ mod deploy_tests {
             (
                 vec![""],
                 vec!["configmaps", "services"],
-                vec!["create", "get", "list", "patch", "update", "watch"],
+                vec![
+                    "create", "delete", "get", "list", "patch", "update", "watch",
+                ],
             ),
             (
                 vec!["apps"],
                 vec!["statefulsets"],
                 vec!["create", "get", "list", "patch", "update", "watch"],
+            ),
+            (
+                vec!["apps"],
+                vec!["deployments"],
+                vec![
+                    "create", "delete", "get", "list", "patch", "update", "watch",
+                ],
+            ),
+            (
+                vec!["networking.k8s.io"],
+                vec!["ingresses"],
+                vec![
+                    "create", "delete", "get", "list", "patch", "update", "watch",
+                ],
             ),
             (
                 vec!["policy"],

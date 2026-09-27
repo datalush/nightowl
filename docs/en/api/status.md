@@ -62,6 +62,7 @@ Still absent until the per-server Admin read API exists: `coordinator.activePod`
 | `coordinatorEndpoints` | list of strings | Endpoints clients can use to discover the Coordinator. |
 | `coordinator` | optional object | Desired/ready replicas and optional `activePod`. |
 | `tabletServers` | optional object | Desired/ready replicas and optional per-pod `assignedTablets`/`replicaHealth`. |
+| `gateway` | optional object | Desired/ready Gateway replicas plus the in-cluster URL; absent unless requested. |
 | `conditions` | list | Independent operational statements with evidence and transition time. |
 
 Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`; `type` is also an enum: `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, or `OperationBlocked`. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` and `OperationBlocked` (dynamic-config rejections) run today; the rest are planned.

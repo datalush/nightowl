@@ -1,8 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::apps::v1::StatefulSet;
 use k8s_openapi::api::core::v1::{ConfigMap, PersistentVolumeClaim, Secret, Service};
+use k8s_openapi::api::networking::v1::Ingress;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::storage::v1::StorageClass;
 use kube::Api;
@@ -37,6 +39,8 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     let storage_classes: Api<StorageClass> = Api::all(ctx.client.clone());
     let pdbs: Api<PodDisruptionBudget> = Api::namespaced(ctx.client.clone(), &namespace);
     let clusters: Api<FlussCluster> = Api::namespaced(ctx.client.clone(), &namespace);
+    let deployments: Api<Deployment> = Api::namespaced(ctx.client.clone(), &namespace);
+    let ingresses: Api<Ingress> = Api::namespaced(ctx.client.clone(), &namespace);
 
     let mut observations = Vec::new();
     observations
@@ -69,6 +73,20 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
         observations
             .extend(reconcilers::pod_disruption_budget::reconcile(&pdbs, &cluster, &uid).await?);
     }
+    // Optional Gateway: converges (or garbage-collects) the Deployment,
+    // Service and Ingress after the workloads, reporting blocks the same
+    // way. Disabled clusters only emit absence.
+    observations.extend(
+        reconcilers::gateway::reconcile(
+            &deployments,
+            &services,
+            &ingresses,
+            &secrets,
+            &cluster,
+            &uid,
+        )
+        .await?,
+    );
     // Observe-only, always best-effort: health never gates, never errors,
     // and rate-limits itself. Runs even when workloads are blocked — old
     // pods from a previous good state may still answer.

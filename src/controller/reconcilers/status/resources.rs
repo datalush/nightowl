@@ -63,6 +63,18 @@ pub(super) fn condition_tuple(
     }
 
     if let Some((name, message)) = observations.iter().find_map(|o| match o {
+        Observation::GatewayBlocked { name, message } => Some((name.clone(), message.clone())),
+        _ => None,
+    }) {
+        return (
+            ConditionStatus::False,
+            "GatewayBlocked".to_string(),
+            message,
+            vec![format!("gateway {name} blocked")],
+        );
+    }
+
+    if let Some((name, message)) = observations.iter().find_map(|o| match o {
         Observation::ResourceBlocked { name, message } => Some((name.clone(), message.clone())),
         _ => None,
     }) {
@@ -112,6 +124,9 @@ pub(super) fn condition_tuple(
     for o in observations {
         if let Observation::ServiceConverged { name, outcome } = o {
             evidence.push(format!("service {name} {}", outcome_detail(outcome)));
+        }
+        if let Observation::GatewayConverged { name, outcome, .. } = o {
+            evidence.push(format!("gateway {name} {}", outcome_detail(outcome)));
         }
     }
     for o in observations {

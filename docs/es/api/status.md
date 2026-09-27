@@ -62,6 +62,7 @@ Siguen ausentes hasta que exista la API Admin de lectura por servidor: `coordina
 | `coordinatorEndpoints` | lista de cadenas | Endpoints de Coordinator para los clientes. |
 | `coordinator` | objeto opcional | Réplicas deseadas/listas y `activePod` opcional. |
 | `tabletServers` | objeto opcional | Réplicas deseadas/listas y, por pod, `assignedTablets` y `replicaHealth` opcionales. |
+| `gateway` | objeto opcional | Réplicas deseadas/listas del Gateway más la URL interna; ausente si no se pide. |
 | `conditions` | lista | Indicadores operativos independientes con evidencia y momento de transición. |
 
 Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. El esquema limita `status` a `"True"`, `"False"` y `"Unknown"`, y `type` a `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` y `OperationBlocked`. Hoy corren `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale` y `OperationBlocked` (rechazos de config dinámica); el resto están planificadas.

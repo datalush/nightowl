@@ -9,6 +9,7 @@ pub mod client_service;
 pub mod config_map;
 pub mod coordinator_service;
 pub mod dynamic_config;
+pub mod gateway;
 pub mod pod_disruption_budget;
 pub mod statefulset;
 pub mod status;
@@ -105,6 +106,23 @@ pub enum Observation {
     DynamicConfigBlocked {
         message: String,
     },
+    /// Gateway object converged: Deployment, Service or Ingress by name.
+    /// `available` carries the Deployment's available replicas and is
+    /// `None` for Service and Ingress observations.
+    GatewayConverged {
+        name: String,
+        outcome: ApplyOutcome,
+        available: Option<i32>,
+    },
+    /// Gateway refused: foreign-owned object in the way, or a referenced
+    /// TLS secret missing — with the reason. Deploys nothing new.
+    GatewayBlocked {
+        name: String,
+        message: String,
+    },
+    /// Gateway absent: disabled or never requested; previously managed
+    /// objects garbage-collected (or already gone).
+    GatewayAbsent,
 }
 
 impl Observation {

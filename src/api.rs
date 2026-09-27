@@ -40,6 +40,11 @@ pub struct FlussClusterSpec {
     pub defaults: Option<TableDefaultsSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observability: Option<ObservabilitySpec>,
+    /// Optional Gateway: absent or disabled means nothing is deployed.
+    /// Opt-in only — a trust-mode HTTP write endpoint is never raised
+    /// unless asked for explicitly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<GatewaySpec>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub configuration_overrides: BTreeMap<String, String>,
 }
@@ -112,6 +117,51 @@ pub struct TabletServersSpec {
     pub pod_template: Option<PodTemplateSpec>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub configuration_overrides: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewaySpec {
+    /// Master switch, default off. `false` (or absent section) deploys
+    /// nothing and garbage-collects previously managed Gateway objects.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Stateless replicas; 1 suffices to start, scaling is linear.
+    #[serde(default = "default_gateway_replicas")]
+    #[schemars(range(min = 1))]
+    pub replicas: i32,
+    /// Gateway image; defaults to the Fluss release mate
+    /// (`apache/fluss-gateway:<spec.version>`). Declared by the user so
+    /// Gateway and server releases stay decoupled — no version matrix
+    /// is hardcoded in the operator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// Optional exterior door. The operator creates the Ingress object
+    /// only; TLS secret, DNS and auth live in the environment and must
+    /// already exist — otherwise the step refuses with evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingress: Option<GatewayIngressSpec>,
+}
+
+/// Default Gateway replicas: one stateless instance.
+fn default_gateway_replicas() -> i32 {
+    1
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayIngressSpec {
+    /// Public hostname, e.g. `<tenant>.fluss.datalush.com`. The pattern
+    /// itself is user data, never hardcoded in the operator.
+    pub host: String,
+    /// Ingress class of the environment (e.g. `traefik`); passed through
+    /// verbatim, never validated against cluster state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub class_name: Option<String>,
+    /// Existing TLS Secret in the FlussCluster namespace. Checked before
+    /// creating the Ingress; a missing secret refuses with evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_secret_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -412,6 +462,10 @@ pub struct FlussClusterStatus {
     /// the allowlist holds credential-bearing keys.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub applied_dynamic_config: BTreeMap<String, String>,
+    /// Gateway presence, or absent when not requested. Readiness comes from
+    /// the Deployment (kubelet gates pods on the Gateway's own `/ready`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gateway: Option<GatewayStatus>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
@@ -429,6 +483,16 @@ pub struct TabletServersStatus {
     pub ready: i32,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pods: Vec<TabletServerPodStatus>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct GatewayStatus {
+    pub desired: i32,
+    pub ready: i32,
+    /// In-cluster URL clients use; the external hostname (if any) lives
+    /// on the Ingress object, not duplicated here.
+    pub url: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

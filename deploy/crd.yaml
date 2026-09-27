@@ -1713,6 +1713,64 @@ spec:
                 - message: minInSyncReplicas must not exceed logReplicationFactor
                   rule: '!has(self.minInSyncReplicas) || self.minInSyncReplicas <=
                     self.logReplicationFactor'
+              gateway:
+                description: "Optional Gateway: absent or disabled means nothing is\
+                  \ deployed.\nOpt-in only \u2014 a trust-mode HTTP write endpoint\
+                  \ is never raised\nunless asked for explicitly."
+                nullable: true
+                properties:
+                  enabled:
+                    default: false
+                    description: 'Master switch, default off. `false` (or absent section)
+                      deploys
+
+                      nothing and garbage-collects previously managed Gateway objects.'
+                    type: boolean
+                  image:
+                    description: "Gateway image; defaults to the Fluss release mate\n\
+                      (`apache/fluss-gateway:<spec.version>`). Declared by the user\
+                      \ so\nGateway and server releases stay decoupled \u2014 no version\
+                      \ matrix\nis hardcoded in the operator."
+                    nullable: true
+                    type: string
+                  ingress:
+                    description: "Optional exterior door. The operator creates the\
+                      \ Ingress object\nonly; TLS secret, DNS and auth live in the\
+                      \ environment and must\nalready exist \u2014 otherwise the step\
+                      \ refuses with evidence."
+                    nullable: true
+                    properties:
+                      className:
+                        description: 'Ingress class of the environment (e.g. `traefik`);
+                          passed through
+
+                          verbatim, never validated against cluster state.'
+                        nullable: true
+                        type: string
+                      host:
+                        description: 'Public hostname, e.g. `<tenant>.fluss.datalush.com`.
+                          The pattern
+
+                          itself is user data, never hardcoded in the operator.'
+                        type: string
+                      tlsSecretName:
+                        description: 'Existing TLS Secret in the FlussCluster namespace.
+                          Checked before
+
+                          creating the Ingress; a missing secret refuses with evidence.'
+                        nullable: true
+                        type: string
+                    required:
+                    - host
+                    type: object
+                  replicas:
+                    default: 1
+                    description: Stateless replicas; 1 suffices to start, scaling
+                      is linear.
+                    format: int32
+                    minimum: 1.0
+                    type: integer
+                type: object
               image:
                 properties:
                   pullPolicy:
@@ -3728,6 +3786,30 @@ spec:
                 items:
                   type: string
                 type: array
+              gateway:
+                description: 'Gateway presence, or absent when not requested. Readiness
+                  comes from
+
+                  the Deployment (kubelet gates pods on the Gateway''s own `/ready`).'
+                nullable: true
+                properties:
+                  desired:
+                    format: int32
+                    type: integer
+                  ready:
+                    format: int32
+                    type: integer
+                  url:
+                    description: 'In-cluster URL clients use; the external hostname
+                      (if any) lives
+
+                      on the Ingress object, not duplicated here.'
+                    type: string
+                required:
+                - desired
+                - ready
+                - url
+                type: object
               observedConfigHash:
                 nullable: true
                 type: string

@@ -30,6 +30,19 @@ pub const ROLE_COORDINATOR: &str = "coordinator";
 /// Value of [`LABEL_ROLE`] for TabletServer resources.
 pub const ROLE_TABLET: &str = "tabletserver";
 
+/// Value of [`LABEL_ROLE`] for Gateway resources.
+pub const ROLE_GATEWAY: &str = "gateway";
+
+/// Suffix appended to the FlussCluster name for the Gateway Deployment,
+/// Service and optional Ingress (all three share the base name).
+pub const GATEWAY_SUFFIX: &str = "-gateway";
+
+/// Gateway REST port (upstream default).
+pub const GATEWAY_REST_PORT: i32 = 8080;
+
+/// Gateway Prometheus port (upstream default).
+pub const GATEWAY_METRICS_PORT: i32 = 9095;
+
 /// Suffix appended to the FlussCluster name for the Coordinator headless Service.
 pub const COORDINATOR_HEADLESS_SUFFIX: &str = "-coordinator-headless";
 

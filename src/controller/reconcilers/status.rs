@@ -19,7 +19,9 @@ use kube::Api;
 use kube::api::PostParams;
 
 use super::Observation;
-use crate::api::{ConditionStatus, FlussCluster, FlussClusterStatus, FlussConditionType};
+use crate::api::{
+    ConditionStatus, FlussCluster, FlussClusterStatus, FlussConditionType, GatewayStatus,
+};
 use crate::controller::Error;
 
 /// Render the desired status from observations and write it if it changed.
@@ -96,6 +98,7 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
             Observation::ConfigHash { value } => Some(value.clone()),
             _ => None,
         }),
+        gateway: gateway_status(cluster, observations),
         applied_dynamic_config: observations
             .iter()
             .find_map(|o| match o {
@@ -117,7 +120,42 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
     }
 }
 
-/// Write the status subresource only when it differs from the current one.
+/// Gateway presence: fresh deployment observation wins, explicit absence
+/// clears, otherwise the standing value survives (steady state is
+/// write-free). Desired replicas mirror the spec default of 1.
+fn gateway_status(cluster: &FlussCluster, observations: &[Observation]) -> Option<GatewayStatus> {
+    if observations
+        .iter()
+        .any(|o| matches!(o, Observation::GatewayAbsent))
+    {
+        return None;
+    }
+    if let Some(available) = observations.iter().find_map(|o| match o {
+        Observation::GatewayConverged {
+            available: Some(available),
+            ..
+        } => Some(*available),
+        _ => None,
+    }) {
+        let namespace = cluster.metadata.namespace.clone().unwrap_or_default();
+        let name = cluster.metadata.name.clone().unwrap_or_default();
+        let desired = cluster
+            .spec
+            .gateway
+            .as_ref()
+            .map(|spec| spec.replicas)
+            .unwrap_or(1);
+        return Some(GatewayStatus {
+            desired,
+            ready: available,
+            url: format!("http://{name}-gateway.{namespace}.svc.cluster.local:8080"),
+        });
+    }
+    cluster
+        .status
+        .as_ref()
+        .and_then(|status| status.gateway.clone())
+}
 ///
 /// Uses `replace_status` (PUT): a JSON merge patch is applied at the
 /// document root, so patching `/status` would require wrapping the content
