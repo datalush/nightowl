@@ -54,8 +54,8 @@ Retira ambas al terminar (`ip route del`, borrar las líneas de hosts). Los fall
 | k3d | v5.9.0 |
 | Kubernetes (k3s) | v1.35.5+k3s1 (1 server + 3 agents) |
 | ZooKeeper (chart Bitnami / app) | zookeeper-0.15.0 / 3.9.5 |
-| Fluss de referencia (chart / app) | fluss-1.0.0 / `apache/fluss:1.0.0` |
-| Imagen bajo prueba | `apache/fluss:1.0.0` vía `spec.version` del CR |
+| Fluss de referencia (chart / app) | fluss-1.0.0 / `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.1` (rodado el 2026-09-27, antes `apache/fluss:1.0.0`) |
+| Imagen bajo prueba | `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.1` vía `spec.version` del CR |
 | Almacenamiento remoto | RustFS 1.0.0 externo (hardware del lab, fuera de banda) |
 
 Refresca esta tabla cada vez que el lab se mueva. El namespace `fluss` de referencia es una instalación Helm fija para comparar; los tests del operador corren exclusivamente en `operator-dev`.
