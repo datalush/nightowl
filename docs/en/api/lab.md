@@ -80,3 +80,7 @@ tabletServers:
 ```
 
 The scrape job (`fluss-pods`) keeps only port-9249 targets and rewrites `__address__` to pod-IP:9249. Verified 2026-09-27: 3/3 pods `up`, 1131 `fluss_*` series queryable, coordinator gauges reflecting the live test (`activeTabletServerCount=2`, `tableCount=1`). After editing the scrape ConfigMap, reload with `POST /-/reload` (volume sync can lag ~1 min). Note: the Bitnami `prometheus` chart was unusable (its pinned image tag does not resolve); the hand-written manifests above are the lab fixture.
+
+## Fluss Gateway (ship-checked, not deployed by default)
+
+The upstream Gateway does **not** ship inside `apache/fluss:1.0.0` — it is a separate distribution: container `apache/fluss-gateway:1.0.0`, configured purely by environment (`FLUSS_GATEWAY__CLUSTER__DEFAULT__BOOTSTRAP__SERVERS` pointing at an operator-managed coordinator). Ship-checked 2026-09-27 against an operator cluster: Deployment (stock image, one env var) plus ClusterIP Service; `/health` and `/ready` OK; log-table create plus 3/3 appends, PK-table create plus 2/2 upserts, and table describe all over plain HTTP. Verdict: direct use, no fork and no source build needed. Known preview limits (1.0): trust mode only (no auth/TLS), no record reads (lookups/scans need a native client), at-least-once writes. Sources: [Gateway](https://fluss.apache.org/docs/next/gateway), [Deploying](https://fluss.apache.org/docs/install-deploy/deploying-gateway/).

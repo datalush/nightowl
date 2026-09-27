@@ -80,3 +80,7 @@ tabletServers:
 ```
 
 El job (`fluss-pods`) solo conserva targets del puerto 9249 y reescribe `__address__` a IP-de-pod:9249. Verificado el 2026-09-27: 3/3 pods `up`, 1131 series `fluss_*` queryables, gauges del coordinator reflejando el test vivo (`activeTabletServerCount=2`, `tableCount=1`). Tras editar el ConfigMap de scrape, recargar con `POST /-/reload` (el volumen puede tardar ~1 min en sincronizar). Nota: el chart `prometheus` de Bitnami resultó inutilizable (su tag de imagen fijado no resuelve); los manifiestos escritos a mano son el fixture del lab.
+
+## Fluss Gateway (verificado, no desplegado por defecto)
+
+El Gateway upstream **no** viene dentro de `apache/fluss:1.0.0` — es una distribución aparte: contenedor `apache/fluss-gateway:1.0.0`, configurado solo por entorno (`FLUSS_GATEWAY__CLUSTER__DEFAULT__BOOTSTRAP__SERVERS` apuntando a un coordinator gestionado). Verificado el 2026-09-27 contra un clúster del operador: Deployment (imagen stock, una variable) más Service ClusterIP; `/health` y `/ready` OK; creación de tabla de log más 3/3 appends, creación de tabla PK más 2/2 upserts y describe por HTTP plano. Veredicto: uso directo, sin fork ni compilar fuentes. Límites conocidos del preview (1.0): solo modo trust (sin auth/TLS), sin lecturas de registros (lookups/scans piden cliente nativo), writes at-least-once. Fuentes: [Gateway](https://fluss.apache.org/docs/next/gateway), [Deploying](https://fluss.apache.org/docs/install-deploy/deploying-gateway/).
