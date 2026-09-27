@@ -124,6 +124,14 @@ pub async fn run(client: Client, namespace: Option<String>) {
                 Ok((obj, _)) => {
                     tracing::debug!(name = %obj.name, "reconciled");
                 }
+                // Retryable blocks already warned with context in
+                // `error_policy`; repeating them as errors here would
+                // turn every 60s requeue into ERROR noise.
+                Err(kube::runtime::controller::Error::ReconcilerFailed(e, _))
+                    if matches!(e, Error::RetryableBlock { .. }) =>
+                {
+                    tracing::debug!("blocked pass requeued");
+                }
                 Err(e) => {
                     tracing::error!(error = %e, "reconcile stream error");
                 }
