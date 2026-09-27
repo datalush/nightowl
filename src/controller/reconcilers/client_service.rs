@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Reconcile the shared client Service and report what happened.
 //!
 //! Same contract as the headless Service steps: blocks are reported as

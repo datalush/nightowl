@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! One reconciler per managed thing, coordinated by [`super::reconcile`].
 //!
 //! Each step converges a single resource (or the status) and reports an

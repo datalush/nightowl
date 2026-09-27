@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Generic converge-one-object helper.
 //!
 //! Knows Kubernetes mechanics (get/create/replace, owner check) and nothing

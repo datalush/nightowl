@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Minimal TabletServer headless Service: stable per-pod DNS only.
 //!
 //! Exists so StatefulSet pods resolve as

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Best-effort Fluss-side health probe: observe, never gate.
 //!
 //! Dials the coordinator over the internal listener and reads cluster

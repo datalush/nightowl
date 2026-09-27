@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Dynamic-vs-restart config classification (j5v3 slice).
 //!
 //! Fluss applies a fixed allowlist of keys live via `Admin.alterClusterConfigs`

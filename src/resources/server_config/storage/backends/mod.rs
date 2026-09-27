@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! One module per remote-storage backend, each rendering its own
 //! `server.yaml` properties from its own spec type.
 //!

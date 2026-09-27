@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! The `KubernetesResourcesReady` condition: every managed workload kind.
 //!
 //! A block wins over convergence: if any Service, ConfigMap, StatefulSet,

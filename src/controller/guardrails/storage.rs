@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Remote-storage reference preflight (security surface).
 //!
 //! Renders nothing; verifies the objects `server.yaml` will point at

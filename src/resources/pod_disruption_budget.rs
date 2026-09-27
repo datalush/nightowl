@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Desired PodDisruptionBudgets, one per role at most.
 //!
 //! Tablets get the FIP-41 safe default (`maxUnavailable: 0`) unless the CR

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Shared status-rendering helpers: no topic logic here.
 //!
 //! Every topic module (`resources`, `storage`, `fluss`) builds its piece

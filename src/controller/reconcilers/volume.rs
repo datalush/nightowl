@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! PVC lifecycle guard: retention is declared, expansion is earned.
 //!
 //! StatefulSet `volumeClaimTemplates` are immutable, so storage changes

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Shared Kubernetes naming and ownership constants.
 //!
 //! The literals live here once so a future rename only touches this file.

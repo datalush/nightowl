@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Prometheus scrape wiring: the reporter key in the base config, plus pod
 //! annotations derived from the effective (merged) properties.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Reconcile the Coordinator headless Service and report what happened.
 
 use k8s_openapi::api::core::v1::Service;

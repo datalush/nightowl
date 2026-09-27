@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Ownership policy: never adopt objects owned by someone else.
 
 /// True when the existing object is controlled by our FlussCluster.

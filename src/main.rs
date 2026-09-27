@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 use nightowl::controller;
 
 /// Watch every namespace unless `--namespace <name>` pins one.

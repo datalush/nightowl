@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::{
@@ -151,8 +152,8 @@ fn default_gateway_replicas() -> i32 {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GatewayIngressSpec {
-    /// Public hostname, e.g. `<tenant>.fluss.datalush.com`. The pattern
-    /// itself is user data, never hardcoded in the operator.
+    /// Public hostname, e.g. `gateway.example.com`. The pattern itself
+    /// is user data, never hardcoded in the operator.
     pub host: String,
     /// Ingress class of the environment (e.g. `traefik`); passed through
     /// verbatim, never validated against cluster state.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Shared client ClusterIP Service for in-cluster Fluss clients.
 //!
 //! One Service, both roles: the CR models a single client listener and Fluss

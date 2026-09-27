@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Static heap-vs-memory backstop: `jvm.heap` must fit the container.
 //!
 //! A heap larger than the container memory is a guaranteed OOMKill (exit

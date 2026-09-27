@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Observed-only `.status` writer.
 //!
 //! Renders the desired `FlussClusterStatus` from the steps' [`Observation`]s

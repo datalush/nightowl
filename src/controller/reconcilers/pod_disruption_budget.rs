@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Reconcile both PodDisruptionBudgets (coordinator + tablet) and report
 //! what happened.
 //!

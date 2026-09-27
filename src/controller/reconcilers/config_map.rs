@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Reconcile both ConfigMaps (coordinator + tablet) and report what happened.
 
 use k8s_openapi::api::core::v1::ConfigMap;

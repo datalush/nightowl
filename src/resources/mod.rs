@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 pub mod client_service;
 pub mod config_map;
 pub mod coordinator_service;

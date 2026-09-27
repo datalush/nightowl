@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! The `RemoteStorageReady` condition: S3 reference preflight.
 //!
 //! The preflight always reports exactly one observation, so this condition

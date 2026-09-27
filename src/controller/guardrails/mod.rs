@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Runtime precondition checks (guardrails).
 //!
 //! Unlike admission-time CEL rules, these read live cluster state or cover

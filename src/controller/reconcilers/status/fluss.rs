@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Fluss-side status: health fields plus the `FlussReachable` and
 //! `ClusterHealthy` conditions, all decided on observed data only.
 //!

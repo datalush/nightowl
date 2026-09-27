@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Pod shape: template metadata, placement, and identity linkage.
 //!
 //! User pod labels/annotations ride along (ours win on collision) while the

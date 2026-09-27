@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Optional Gateway: stock upstream Deployment plus Service plus optional
 //! Ingress, all sharing one base name. Opt-in only (`spec.gateway.enabled`);
 //! absent or disabled means the reconciler deletes these instead of

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Desired Coordinator / TabletServer StatefulSets.
 //!
 //! One file per concern under [`statefulset`](self): `container` (identity

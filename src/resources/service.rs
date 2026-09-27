@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Shared Service comparison: managed fields only.
 //!
 //! The apiserver defaults several Service fields on write (`targetPort`,

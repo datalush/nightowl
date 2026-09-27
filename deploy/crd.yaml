@@ -1748,10 +1748,10 @@ spec:
                         nullable: true
                         type: string
                       host:
-                        description: 'Public hostname, e.g. `<tenant>.fluss.datalush.com`.
-                          The pattern
+                        description: 'Public hostname, e.g. `gateway.example.com`.
+                          The pattern itself
 
-                          itself is user data, never hardcoded in the operator.'
+                          is user data, never hardcoded in the operator.'
                         type: string
                       tlsSecretName:
                         description: 'Existing TLS Secret in the FlussCluster namespace.

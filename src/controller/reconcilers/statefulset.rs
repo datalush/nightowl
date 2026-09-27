@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Reconcile both StatefulSets (coordinator + tablet) and report what happened.
 //!
 //! Mirrors `config_map.rs`: one [`Observation`] per StatefulSet, builder

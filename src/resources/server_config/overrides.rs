@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 use std::collections::BTreeMap;
 
 use super::{jvm, listeners, storage, table_defaults, zookeeper};

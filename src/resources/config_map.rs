@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 use std::collections::BTreeMap;
 
 use k8s_openapi::api::core::v1::ConfigMap;

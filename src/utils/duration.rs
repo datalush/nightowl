@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Fluss duration strings to seconds.
 //!
 //! Fluss configuration uses human durations (`30s`, `5min`, `1h`); the

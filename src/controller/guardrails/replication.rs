@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Static topology backstop: RF must not exceed tablet count.
 //!
 //! Mirrors the CEL rule on the parent spec for upgrade windows where the

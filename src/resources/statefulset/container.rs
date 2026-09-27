@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! The Fluss container: identity boot script, probes and resources.
 //!
 //! Each pod derives its own identity at boot (ordinal id plus pod-IP bind

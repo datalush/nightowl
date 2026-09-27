@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Dynamic config application (j5v3 slice): push allowlisted keys live via
 //! `Admin.alterClusterConfigs` instead of rolling pods.
 //!

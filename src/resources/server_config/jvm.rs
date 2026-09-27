@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Render the JVM options `server.yaml` properties.
 //!
 //! The image reads `env.java.opts.<role>` from `server.yaml` (falling back

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Reconcile the optional Gateway (Deployment plus Service plus optional
 //! Ingress) and report what happened.
 //!

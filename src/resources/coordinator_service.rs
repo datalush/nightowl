@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 use crate::api::FlussCluster;
 use crate::constants::{
     API_VERSION, COORDINATOR_HEADLESS_SUFFIX, KIND_FLUSS_CLUSTER, LABEL_CLUSTER, LABEL_ROLE,

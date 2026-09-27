@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Reconcile the TabletServer headless Service and report what happened.
 //!
 //! Same contract as the Coordinator Service step: blocks are reported as

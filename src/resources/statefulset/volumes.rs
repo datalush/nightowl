@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Pod volumes: staged config, S3 credentials, and the data volume.
 //!
 //! The shared `server.yaml` lands staged (never mounted in place — the

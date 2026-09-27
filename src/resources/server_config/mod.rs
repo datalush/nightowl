@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Renderers for the Fluss `server.yaml` content (the letter, not the envelope).
 //!
 //! Each module contributes one concern through `properties()`; `config_map.rs`

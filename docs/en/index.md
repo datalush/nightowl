@@ -2,7 +2,7 @@
   <span class="eyebrow">DATALUSH / OPERATOR DOCUMENTATION</span>
   <h1>Operate Fluss<br>with intent.</h1>
   <p>A declarative Kubernetes API for Apache Fluss clusters. Explore the resource contract, inspect complete manifests, and follow implementation progress without mistaking an API design for a finished controller.</p>
-  <span class="cover-meta">FlussCluster · fluss.datalush.com/v1alpha1 · Fluss 1.0.0 baseline</span>
+  <span class="cover-meta">FlussCluster · fluss.datalush.com/v1alpha1 · Fluss 1.0.0 baseline · AGPL-3.0-only</span>
 </div>
 
 ## Start here

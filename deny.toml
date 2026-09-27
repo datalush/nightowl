@@ -1,0 +1,32 @@
+# License policy: nightowl itself is AGPL-3.0-only. Every third-party
+# dependency must be permissive (or dual/multi-licensed with a permissive
+# choice taken), so the combined work stays distributable under AGPL-3.0.
+# Reviewed 2026-09-27 against the full Cargo.lock inventory: MIT,
+# Apache-2.0, BSD-2/3-Clause, ISC, CC0-1.0, Unlicense, Zlib, BSL-1.0,
+# Unicode-3.0, CDLA-Permissive-2.0, LLVM-exception, plus dual choices
+# (MIT/Apache-2.0/LGPL-2.1-or-later, Apache-2.0/MIT/Zlib) taken permissively.
+# The only unlicensed crate is nightowl itself. Re-review on any failure.
+[licenses]
+version = 2
+# nightowl itself is AGPL-3.0-only (see LICENSE and Cargo.toml); the
+# allow list below constrains third-party dependencies only.
+exceptions = [{ name = "nightowl", allow = ["AGPL-3.0-only"] }]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+registries = []

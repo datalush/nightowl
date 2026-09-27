@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-only
 //! Print the FlussCluster CRD derived from the Rust types.
 //!
 //! Usage: cargo run -q --bin gen-crd | kubectl apply -f -
