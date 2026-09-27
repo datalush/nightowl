@@ -1,6 +1,6 @@
-# Contributing to nightowl
+# Contributing to Night Owl
 
-nightowl is licensed under **AGPL-3.0-only** (see `LICENSE`). By
+Night Owl is licensed under **AGPL-3.0-only** (see `LICENSE`). By
 contributing code, docs, or manifests you agree your contribution enters
 under the same license. There is no contributor license agreement and no
 dual licensing: keep it that way — do not introduce
