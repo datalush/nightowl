@@ -965,7 +965,7 @@ dependencies = [
 [[package]]
 name = "fluss-rs"
 version = "1.0.0"
-source = "git+https://github.com/midnattsol/fluss.git?rev=218ff0897db9dde34552f941276c281bbcb23be4#218ff0897db9dde34552f941276c281bbcb23be4"
+source = "git+https://github.com/midnattsol/fluss.git?rev=53969635ca6ccc52174b9aaa0a968f32ef78a2c0#53969635ca6ccc52174b9aaa0a968f32ef78a2c0"
 dependencies = [
  "arrow",
  "arrow-schema",

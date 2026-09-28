@@ -54,8 +54,8 @@ Remove both when the test ends (`ip route del`, delete the hosts lines). Test fa
 | k3d | v5.9.0 |
 | Kubernetes (k3s) | v1.35.5+k3s1 (1 server + 3 agents) |
 | ZooKeeper (Bitnami chart / app) | zookeeper-0.15.0 / 3.9.5 |
-| Reference Fluss (chart / app) | fluss-1.0.0 / `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.1` (rolled 2026-09-27, was `apache/fluss:1.0.0`) |
-| Operator image under test | `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.1` via CR `spec.version` |
+| Reference Fluss (chart / app) | fluss-1.0.0 / `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.2` (rolled 2026-09-28, was `1.0.0-midnattsol.1`) |
+| Operator image under test | `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.2` via CR `spec.version` |
 | Remote storage | External RustFS 1.0.0 (out-of-band lab hardware) |
 
 Refresh this table whenever the lab moves. The reference `fluss` namespace is a fixed Helm install for comparison; operator tests run exclusively in `operator-dev`.
