@@ -122,6 +122,27 @@ struct Build<'a> {
     scrape_port: Option<String>,
 }
 
+/// Desired static config hash for one role: the same recipe `assemble`
+/// pins into the pod template. The restart sequencer reads it off live
+/// pods to tell stale from current, so both must compute it identically —
+/// keep them together here.
+pub(crate) fn static_config_hash(
+    cluster: &FlussCluster,
+    coordinator: bool,
+) -> Result<String, ConfigError> {
+    let properties = match coordinator {
+        true => config_map::coordinator_properties(cluster)?,
+        false => config_map::tablet_properties(cluster)?,
+    };
+    let other = match coordinator {
+        true => config_map::tablet_properties(cluster)?,
+        false => config_map::coordinator_properties(cluster)?,
+    };
+    let appliable = dynamic::appliable(&properties, &other);
+    let server_yaml = render::to_yaml(&dynamic::without_appliable(&properties, &appliable));
+    Ok(hash::sha256_hex(&server_yaml))
+}
+
 impl<'a> Build<'a> {
     /// Resolve everything `build` needs. Rendering the `server.yaml` is the
     /// only fallible step, so it happens here, once. The secret hash arrives
@@ -144,13 +165,9 @@ impl<'a> Build<'a> {
         // Rollout identity covers the static subset only: dynamic keys ride
         // Admin (see server_config::dynamic), so dynamic-only changes move
         // no pods. Computed from both roles because cluster-wide appliability
-        // needs identical values on each side.
-        let other = match role {
-            Role::Coordinator => config_map::tablet_properties(cluster)?,
-            Role::Tablet => config_map::coordinator_properties(cluster)?,
-        };
-        let appliable = dynamic::appliable(&properties, &other);
-        let server_yaml = render::to_yaml(&dynamic::without_appliable(&properties, &appliable));
+        // needs identical values on each side. Shared with the restart
+        // sequencer through `static_config_hash` — one recipe, two readers.
+        let config_hash = static_config_hash(cluster, matches!(role, Role::Coordinator))?;
         let fallback = format!("{}:{}", cluster.spec.image.repository, cluster.spec.version);
         let image = match role {
             Role::Coordinator => cluster.spec.coordinator.image.clone().unwrap_or(fallback),
@@ -169,7 +186,7 @@ impl<'a> Build<'a> {
                 (LABEL_CLUSTER.to_string(), cluster_name.clone()),
                 (LABEL_ROLE.to_string(), role.label().to_string()),
             ]),
-            config_hash: hash::sha256_hex(&server_yaml),
+            config_hash,
             secret_hash: secret_hash.map(str::to_string),
             scrape_port: metrics::scrape_port(&properties),
             cluster_name,

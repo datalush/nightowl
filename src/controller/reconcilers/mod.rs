@@ -140,6 +140,12 @@ pub enum Observation {
     RestartKeysAttempted {
         keys: Vec<String>,
     },
+    /// Observed running version: emitted when every pod is verified
+    /// current (fresh bring-up or sequence completion). The writer prefers
+    /// it over the standing value and never copies `spec.version` blindly.
+    VersionObserved {
+        version: String,
+    },
     /// Gateway object converged: Deployment, Service or Ingress by name.
     /// `available` carries the Deployment's available replicas and is
     /// `None` for Service and Ingress observations.

@@ -16,7 +16,7 @@ Convenciones: **soportado** (implementado y verificado en lab), **bloqueado** (p
 | Orden de arranque: config → coordinator → tablets → Ready | Soportado | Verificado, incluida idempotencia ante reinicios. |
 | PDB `maxUnavailable: 0` en tablets; el operador rota por borrado directo | Soportado | Verificado; el PDB solo frena evictions, no el borrado directo. |
 | Gate de scale-in (rechazar servidor no vacío) | Soportado (parcial) | El gate consulta lectura fresca por servidor (imagen fork): registrado-y-vacío converge, lo demás falla cerrado con el motivo exacto. Workflow vivo de borrado pendiente en `g8qz`. |
-| Rolling upgrade: tablets primero, gate `serverGreen` por servidor, estado `Stalled` | Bloqueado | Los restarts secuenciados corren (tablets de la cola primero, con GREEN, `Stalled` con evidencia); la orquestación de upgrade por imagen sigue pendiente (`cm74`). |
+| Rolling upgrade: tablets primero, gate `serverGreen` por servidor, estado `Stalled` | Soportado (parcial) | Los restarts secuenciados corren (tablets de la cola primero, con GREEN, `Stalled` con evidencia); preflight de par de versiones más orquestación de upgrade en `cm74`. |
 | Clasificación de config dinámica vs con restart | Soportado (parcial) | Propiedad de claves forzada, claves desconocidas fallan cerrado; aplicar dinámicas vía Admin está pendiente. |
 | Hash de la config renderizada dirigiendo restarts | Soportado | El hash de config en el pod template dirige al secuenciador de restarts (StatefulSets en OnDelete; sin rolling nativo de Kubernetes). |
 | Resize de almacenamiento (expandir in place, orphan-recreate para la plantilla) | Soportado (parcial) | Expansión verificada en vivo; shrink rechazado. El path orphan-recreate está aceptado pero sin orquestar. |

@@ -185,7 +185,18 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
 
     FlussClusterStatus {
         observed_generation: cluster.metadata.generation,
-        observed_version: Some(cluster.spec.version.clone()),
+        observed_version: observations
+            .iter()
+            .find_map(|o| match o {
+                Observation::VersionObserved { version } => Some(version.clone()),
+                _ => None,
+            })
+            .or_else(|| {
+                cluster
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.observed_version.clone())
+            }),
         observed_config_hash: observations.iter().find_map(|o| match o {
             Observation::ConfigHash { value } => Some(value.clone()),
             _ => None,

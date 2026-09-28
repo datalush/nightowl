@@ -30,6 +30,7 @@ use crate::constants::{
     CONFIG_HASH_ANNOTATION, COORDINATOR_STATEFULSET_SUFFIX, TABLET_STATEFULSET_SUFFIX,
 };
 use crate::controller::Error;
+use crate::resources::statefulset::static_config_hash;
 use crate::utils::duration;
 
 /// Recovery budget when `rollingUpgrade` is absent: a replacement pod gets
@@ -53,6 +54,8 @@ struct PodView {
     age_secs: Option<i64>,
     /// Whether the pod booted with the desired config hash.
     hash_matches: bool,
+    /// Whether the pod runs the desired image.
+    image_matches: bool,
 }
 
 /// One pass decision: at most one deletion, else wait, stall, or silence.
@@ -123,7 +126,7 @@ fn plan_role(inputs: &PlanInputs) -> (Vec<i32>, Action) {
         if inputs.done.contains(&ordinal) {
             continue;
         }
-        if inputs.keys_run || !view.hash_matches {
+        if inputs.keys_run || !view.hash_matches || !view.image_matches {
             return (newly_done, Action::Delete(ordinal));
         }
         newly_done.push(ordinal);
@@ -148,6 +151,7 @@ async fn read_pod(
     pods: &Api<Pod>,
     name: &str,
     desired_hash: &str,
+    desired_image: &str,
     now_secs: i64,
 ) -> Result<PodView, Error> {
     let pod = match pods.get(name).await {
@@ -160,6 +164,7 @@ async fn read_pod(
                 ready_for_secs: None,
                 age_secs: None,
                 hash_matches: false,
+                image_matches: false,
             });
         }
         Err(e) => return Err(Error::Kube(e)),
@@ -178,6 +183,12 @@ async fn read_pod(
         .as_ref()
         .and_then(|annotations| annotations.get(CONFIG_HASH_ANNOTATION))
         .is_some_and(|hash| hash == desired_hash);
+    let image_matches = pod
+        .spec
+        .as_ref()
+        .and_then(|spec| spec.containers.first())
+        .and_then(|container| container.image.as_ref())
+        .is_some_and(|image| image == desired_image);
     let (ready, ready_for_secs) = pod
         .status
         .as_ref()
@@ -200,6 +211,7 @@ async fn read_pod(
         ready_for_secs,
         age_secs,
         hash_matches,
+        image_matches,
     })
 }
 
@@ -251,7 +263,8 @@ async fn read_role(
     cluster: &FlussCluster,
     coordinator: bool,
     replicas: i32,
-    desired: &str,
+    desired_hash: &str,
+    desired_image: &str,
     now_secs: i64,
 ) -> Result<Vec<(i32, PodView)>, Error> {
     let mut views = Vec::new();
@@ -259,9 +272,47 @@ async fn read_role(
         let Some(name) = pod_object_name(cluster, coordinator, ordinal) else {
             return Err(Error::MissingName);
         };
-        views.push((ordinal, read_pod(pods, &name, desired, now_secs).await?));
+        views.push((
+            ordinal,
+            read_pod(pods, &name, desired_hash, desired_image, now_secs).await?,
+        ));
     }
     Ok(views)
+}
+
+/// Desired container image for one role: per-component override wins,
+/// otherwise `repository:version` — the same fallback the StatefulSet
+/// builder assembles.
+fn desired_image(cluster: &FlussCluster, coordinator: bool) -> String {
+    let fallback = format!("{}:{}", cluster.spec.image.repository, cluster.spec.version);
+    if coordinator {
+        cluster.spec.coordinator.image.clone().unwrap_or(fallback)
+    } else {
+        cluster
+            .spec
+            .tablet_servers
+            .image
+            .clone()
+            .unwrap_or(fallback)
+    }
+}
+
+/// Whether an upgrade from the observed version to the spec version may
+/// start. Same upstream base only: the fork tags `1.0.0-midnattsol.N` share
+/// base `1.0.0` with stock, in either direction. Anything else (new base,
+/// `0.9.x`, unparsable) refuses with the reason — evidence first, no
+/// guessing about cross-version compatibility.
+fn upgrade_preflight(spec_version: &str, observed_version: &str) -> Result<(), String> {
+    fn base(version: &str) -> &str {
+        version.split(['+', '-']).next().unwrap_or(version)
+    }
+    if base(spec_version) == base(observed_version) {
+        Ok(())
+    } else {
+        Err(format!(
+            "unsupported upgrade pair {observed_version} -> {spec_version}: same upstream base only"
+        ))
+    }
 }
 
 /// Sequence a restart pass for one cluster.
@@ -282,13 +333,45 @@ pub async fn reconcile(
     let Some(desired) = desired_hash(observations) else {
         return Ok(Vec::new());
     };
+    // Per-role desired hashes: pod annotations carry the static per-role
+    // hash, never the combined one — comparing against the combined hash
+    // would read every pod as stale forever. A render failure idles here;
+    // the config-map step already reported it.
+    let Ok(tablet_hash) = static_config_hash(cluster, false) else {
+        return Ok(Vec::new());
+    };
+    let Ok(coordinator_hash) = static_config_hash(cluster, true) else {
+        return Ok(Vec::new());
+    };
     let (recovery_secs, stabilization_secs) = match budgets(cluster) {
         Ok(budgets) => budgets,
         Err(message) => {
             return Ok(vec![Observation::RestartStalled { message }]);
         }
     };
+    // Upgrade preflight runs before any health gate: a refused pair must
+    // explain itself even when the cluster underneath is GREEN. `None`
+    // observed means nothing verified yet — the verification emission
+    // below populates it, no preflight needed. Image drift itself needs
+    // no special trigger: pods running another image simply never verify.
+    if let Some(observed) = cluster
+        .status
+        .as_ref()
+        .and_then(|s| s.observed_version.clone())
+        .filter(|observed| *observed != cluster.spec.version)
+    {
+        if let Err(message) = upgrade_preflight(&cluster.spec.version, &observed) {
+            return Ok(vec![Observation::RestartStalled { message }]);
+        }
+    }
     if !fresh_green(observations) {
+        // A live run holding for health explains itself; a quiet cluster
+        // stays silent (health conditions already cover it).
+        if standing_seq.is_some() {
+            return Ok(vec![Observation::RestartStalled {
+                message: "holding sequenced restart: cluster not GREEN".to_string(),
+            }]);
+        }
         return Ok(Vec::new());
     }
     let now_secs = k8s_openapi::jiff::Timestamp::now().as_second();
@@ -310,7 +393,17 @@ pub async fn reconcile(
         seq.for_keys = true;
     }
     let tablet_replicas = cluster.spec.tablet_servers.replicas;
-    let tablet_views = read_role(pods, cluster, false, tablet_replicas, &desired, now_secs).await?;
+    let tablet_image = desired_image(cluster, false);
+    let tablet_views = read_role(
+        pods,
+        cluster,
+        false,
+        tablet_replicas,
+        &tablet_hash,
+        &tablet_image,
+        now_secs,
+    )
+    .await?;
     let tablet_inputs = PlanInputs {
         done: &seq.done_tablet_ordinals,
         views: &tablet_views,
@@ -325,6 +418,10 @@ pub async fn reconcile(
     match action {
         Action::Delete(ordinal) => {
             let name = pod_object_name(cluster, false, ordinal).expect("ordinal was read");
+            tracing::info!(
+                pod = %name,
+                "sequenced restart deleting tablet (one at a time, health-gated)"
+            );
             pods.delete(&name, &DeleteParams::default())
                 .await
                 .map_err(Error::Kube)?;
@@ -345,12 +442,14 @@ pub async fn reconcile(
     // one coordinator the leader check is vacuous beyond GREEN; the shape
     // stays generic for N replicas.
     let coordinator_replicas = cluster.spec.coordinator.replicas;
+    let coordinator_image = desired_image(cluster, true);
     let coordinator_views = read_role(
         pods,
         cluster,
         true,
         coordinator_replicas,
-        &desired,
+        &coordinator_hash,
+        &coordinator_image,
         now_secs,
     )
     .await?;
@@ -369,6 +468,10 @@ pub async fn reconcile(
     match action {
         Action::Delete(ordinal) => {
             let name = pod_object_name(cluster, true, ordinal).expect("ordinal was read");
+            tracing::info!(
+                pod = %name,
+                "sequenced restart deleting coordinator (one at a time, health-gated)"
+            );
             pods.delete(&name, &DeleteParams::default())
                 .await
                 .map_err(Error::Kube)?;
@@ -385,10 +488,17 @@ pub async fn reconcile(
         }
         Action::Idle => {}
     }
-    // Everything verified: clear the run; a keys-driven run additionally
-    // moves its keys to attempted so persistent rejection reports instead
-    // of restart-looping.
-    let mut out = vec![Observation::RestartSeqUpdate { seq: None }];
+    // Everything verified: clear the run and record the running version;
+    // a keys-driven run additionally moves its keys to attempted so
+    // persistent rejection reports instead of restart-looping. The version
+    // emission is idempotent: repeated passes rewrite identical content
+    // and the status write skips.
+    let mut out = vec![
+        Observation::RestartSeqUpdate { seq: None },
+        Observation::VersionObserved {
+            version: cluster.spec.version.clone(),
+        },
+    ];
     if seq.for_keys {
         out.push(Observation::RestartKeysAttempted {
             keys: standing_required,
@@ -399,7 +509,7 @@ pub async fn reconcile(
 
 #[cfg(test)]
 mod tests {
-    use super::{Action, PlanInputs, PodView, budgets, plan_role};
+    use super::{Action, PlanInputs, PodView, budgets, plan_role, upgrade_preflight};
 
     const RECOVERY: u64 = 300;
     const STABILIZATION: u64 = 60;
@@ -412,6 +522,7 @@ mod tests {
             ready_for_secs: Some(600),
             age_secs: Some(3600),
             hash_matches: true,
+            image_matches: true,
         }
     }
 
@@ -437,6 +548,18 @@ mod tests {
         let views = vec![(0, stale_baked()), (1, current_baked()), (2, stale_baked())];
         let (done, action) = plan_role(&inputs(&views, &[], false));
         assert_eq!(action, Action::Delete(2));
+        assert!(done.is_empty(), "a delete advances nothing yet");
+    }
+
+    #[test]
+    fn image_drift_deletes_like_config_drift() {
+        let old_image = PodView {
+            image_matches: false,
+            ..current_baked()
+        };
+        let views = vec![(0, current_baked()), (1, old_image)];
+        let (done, action) = plan_role(&inputs(&views, &[], false));
+        assert_eq!(action, Action::Delete(1));
         assert!(done.is_empty(), "a delete advances nothing yet");
     }
 
@@ -504,6 +627,24 @@ mod tests {
             matches!(action, Action::Stalled(_)),
             "stuck termination must stall, got: {action:?}"
         );
+    }
+
+    #[test]
+    fn preflight_allows_same_base_both_directions() {
+        assert!(upgrade_preflight("1.0.0-midnattsol.1", "1.0.0").is_ok());
+        assert!(upgrade_preflight("1.0.0", "1.0.0-midnattsol.1").is_ok());
+        assert!(upgrade_preflight("1.0.0", "1.0.0").is_ok());
+    }
+
+    #[test]
+    fn preflight_refuses_other_bases_with_reason() {
+        for (spec, observed) in [("1.1.0", "1.0.0"), ("1.0.0", "0.9.1"), ("nope", "1.0.0")] {
+            let err = upgrade_preflight(spec, observed).expect_err("must refuse");
+            assert!(
+                err.contains(spec) && err.contains(observed),
+                "blocker names the pair, got: {err}"
+            );
+        }
     }
 
     #[test]
