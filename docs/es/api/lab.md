@@ -24,6 +24,7 @@ helm install fluss fluss/fluss \
 kubectl apply -f deploy/crd.yaml
 RUST_LOG=info ./target/debug/nightowl --namespace operator-dev
 ```
+Reaplica `deploy/crd.yaml` tras cualquier cambio en la API (campos nuevos de status o tipos de condición): el apiserver rechaza writes de status con valores de enum desconocidos (422) o poda campos desconocidos en silencio, y el fallo parece que el operador está caído en vez de una CRD rancia.
 
 Espera a `zk-zookeeper-0`, `coordinator-server-0` y los tres `tablet-server-N` en `fluss` antes de probar el operador.
 
