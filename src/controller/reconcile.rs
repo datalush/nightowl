@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::apps::v1::StatefulSet;
-use k8s_openapi::api::core::v1::{ConfigMap, PersistentVolumeClaim, Secret, Service};
+use k8s_openapi::api::core::v1::{ConfigMap, PersistentVolumeClaim, Pod, Secret, Service};
 use k8s_openapi::api::networking::v1::Ingress;
 use k8s_openapi::api::policy::v1::PodDisruptionBudget;
 use k8s_openapi::api::storage::v1::StorageClass;
@@ -96,6 +96,11 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     // gate, and its observations land in the status write below.
     let dynamic = reconcilers::dynamic_config::reconcile(&cluster, &observations).await;
     observations.extend(dynamic);
+    // Sequenced restarts run after dynamic config so a rejection observed
+    // this pass escalates through standing key lists next pass; the step
+    // reads no standing decisions, only live pods plus standing lists.
+    let pods: Api<Pod> = Api::namespaced(ctx.client.clone(), &namespace);
+    observations.extend(reconcilers::restart::reconcile(&pods, &cluster, &observations).await?);
 
     if reconcilers::status::reconcile(&clusters, &cluster, &observations).await? {
         tracing::info!(cluster = %name, "updated FlussCluster status");

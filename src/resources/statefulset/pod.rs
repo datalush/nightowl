@@ -33,6 +33,10 @@ impl<'a> Build<'a> {
             template_labels.extend(t.labels.clone());
             template_annotations.extend(t.annotations.clone());
         }
+        // Config hash rides the template so the restart step can tell
+        // stale pods from current ones by reading it off live pods. The
+        // StatefulSet runs OnDelete, so a changed hash updates the
+        // template without rolling anything behind the sequencer's back.
         template_annotations.insert(CONFIG_HASH_ANNOTATION.to_string(), self.config_hash.clone());
         // Prometheus scrape follows the effective reporter port resolved at
         // assemble time: absent exactly when nothing listens. Operator keys

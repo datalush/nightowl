@@ -78,8 +78,24 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
     conditions.extend(storage::secret_condition(cluster, observations));
     // Dynamic config: a rejection is a stall the status must explain (j5v3);
     // applied hashes replace the field wholesale when this pass applied.
+    // Rejected keys escalate to restart-bound unless already attempted (no
+    // restart loops); applied keys clear from both restart lists.
+    let mut restart_required: std::collections::BTreeSet<String> = cluster
+        .status
+        .as_ref()
+        .map(|s| s.restart_required_keys.iter().cloned().collect())
+        .unwrap_or_default();
+    let mut restart_attempted: std::collections::BTreeSet<String> = cluster
+        .status
+        .as_ref()
+        .map(|s| s.restart_attempted_keys.iter().cloned().collect())
+        .unwrap_or_default();
+    let mut rejected: Vec<String> = Vec::new();
     if let Some(message) = observations.iter().find_map(|o| match o {
-        Observation::DynamicConfigBlocked { message } => Some(message),
+        Observation::DynamicConfigBlocked { message, keys } => {
+            rejected.extend(keys.iter().cloned());
+            Some(message)
+        }
         _ => None,
     }) {
         conditions.push(common::condition(
@@ -88,6 +104,81 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
             ConditionStatus::True,
             "DynamicConfigRejected".to_string(),
             message.clone(),
+            Vec::new(),
+        ));
+    }
+    let attempted_now: Vec<String> = observations
+        .iter()
+        .filter_map(|o| match o {
+            Observation::RestartKeysAttempted { keys } => Some(keys.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    // Sequenced-restart run: fresh update wins, otherwise the standing run
+    // survives (steady state is write-free).
+    let restart_seq = observations
+        .iter()
+        .find_map(|o| match o {
+            Observation::RestartSeqUpdate { seq } => Some(seq.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| cluster.status.as_ref().and_then(|s| s.restart_seq.clone()));
+    // Restart-bound key lists, as sorted vecs for write-stable comparison:
+    // applied keys clear everywhere; fresh rejections escalate unless
+    // already attempted; completed key-driven sequences move to attempted.
+    let applied: std::collections::BTreeMap<String, String> = observations
+        .iter()
+        .find_map(|o| match o {
+            Observation::DynamicConfigApplied { applied } => Some(applied.clone()),
+            _ => None,
+        })
+        .or_else(|| {
+            cluster
+                .status
+                .as_ref()
+                .map(|status| status.applied_dynamic_config.clone())
+        })
+        .unwrap_or_default();
+    for key in applied.keys().chain(attempted_now.iter()) {
+        restart_required.remove(key);
+    }
+    for key in rejected
+        .iter()
+        .filter(|key| !restart_attempted.contains(*key))
+    {
+        restart_required.insert(key.clone());
+    }
+    for key in attempted_now {
+        restart_attempted.insert(key);
+    }
+    for key in applied.keys() {
+        restart_attempted.remove(key);
+    }
+    let restart_required_keys: Vec<String> = restart_required.into_iter().collect();
+    let restart_attempted_keys: Vec<String> = restart_attempted.into_iter().collect();
+    // Sequenced restarts: a fresh stall reports with evidence, otherwise
+    // the condition reads clear (steady state stays write-free — identical
+    // content skips the write below).
+    if let Some(message) = observations.iter().find_map(|o| match o {
+        Observation::RestartStalled { message } => Some(message),
+        _ => None,
+    }) {
+        conditions.push(common::condition(
+            cluster,
+            FlussConditionType::Stalled,
+            ConditionStatus::True,
+            "RestartStalled".to_string(),
+            message.clone(),
+            vec![message.clone()],
+        ));
+    } else {
+        conditions.push(common::condition(
+            cluster,
+            FlussConditionType::Stalled,
+            ConditionStatus::False,
+            "NoRestartStall".to_string(),
+            "no restart stalled".to_string(),
             Vec::new(),
         ));
     }
@@ -100,19 +191,10 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
             _ => None,
         }),
         gateway: gateway_status(cluster, observations),
-        applied_dynamic_config: observations
-            .iter()
-            .find_map(|o| match o {
-                Observation::DynamicConfigApplied { applied } => Some(applied.clone()),
-                _ => None,
-            })
-            .or_else(|| {
-                cluster
-                    .status
-                    .as_ref()
-                    .map(|status| status.applied_dynamic_config.clone())
-            })
-            .unwrap_or_default(),
+        restart_seq,
+        restart_required_keys,
+        restart_attempted_keys,
+        applied_dynamic_config: applied,
         cluster_health,
         coordinator_endpoints,
         coordinator,

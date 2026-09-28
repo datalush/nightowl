@@ -467,6 +467,37 @@ pub struct FlussClusterStatus {
     /// the Deployment (kubelet gates pods on the Gateway's own `/ready`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gateway: Option<GatewayStatus>,
+    /// Admin-rejected dynamic keys escalated to restart-bound. Cleared for
+    /// a key once a restart was attempted for it (`restart_attempted_keys`)
+    /// or Admin finally applies it — so a persistently rejected key reports
+    /// instead of restart-looping.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restart_required_keys: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restart_attempted_keys: Vec<String>,
+    /// Sequenced-restart progress, or absent when no restart is running.
+    /// Persists across operator restarts so a new instance resumes instead
+    /// of duplicating pod deletions. Cleared on completion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_seq: Option<RestartSeq>,
+}
+
+/// One sequenced-restart run: tablets tail-first, then the coordinator.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestartSeq {
+    /// Combined config hash the run drives all pods to.
+    pub target_hash: String,
+    /// True when the run exists only for restart-bound keys (pod hashes
+    /// already match; completion moves them to attempted).
+    #[serde(default)]
+    pub for_keys: bool,
+    /// Tablet ordinals already deleted and verified new.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub done_tablet_ordinals: Vec<i32>,
+    /// Coordinator ordinals already deleted and verified new.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub done_coordinator_ordinals: Vec<i32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

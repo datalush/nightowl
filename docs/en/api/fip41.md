@@ -16,11 +16,11 @@ Conventions: **supported** (implemented and lab-verified), **blocked** (needs up
 | Bootstrap order: config → coordinator → tablets → Ready | Supported | Verified, including restart idempotency. |
 | PDB `maxUnavailable: 0` on tablets; operator rolls via direct delete | Supported | Verified; PDB blocks eviction only, direct delete unaffected. |
 | Scale-in safety gate (refuse non-empty server) | Supported (partial) | Gate consults a fresh per-server read (fork image): registered-and-empty converges, anything else fails closed with the exact blocker. Live removal workflow pending in `g8qz`. |
-| Rolling upgrade: tablets first, per-server `serverGreen` gate, `Stalled` state | Blocked | Current order is coordinator-first (+1 only); per-server `serverGreen` is readable from the fork image, gating on it is still pending. |
+| Rolling upgrade: tablets first, per-server `serverGreen` gate, `Stalled` state | Blocked | Sequenced restarts run (tail-first tablets, GREEN-gated, `Stalled` with evidence); image-change upgrade orchestration still pending (`cm74`). |
 | Dynamic vs restart-inducing config classification | Supported (partial) | Key ownership enforced, unknown keys fail closed; dynamic apply via Admin is pending. |
-| Rendered config content-hash driving restarts | Supported | Config hash in pod template; restarts only on real changes. |
+| Rendered config content-hash driving restarts | Supported | Config hash in pod template directs the restart sequencer (StatefulSets run OnDelete; no Kubernetes-native rolling). |
 | Storage resize (expand in place, orphan-recreate for template) | Supported (partial) | Expansion verified live; shrink refused. Orphan-recreate path accepted but not yet orchestrated. |
-| Conditions-only lifecycle (`Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`) | Intentionally different | Area conditions (`KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`); lifecycle conditions belong to the upgrade work. |
+| Conditions-only lifecycle (`Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`) | Intentionally different | Area conditions (`KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`) plus `Stalled` for sequenced-restart stalls; the rest belong to the upgrade work. |
 | Rendered `server.yaml` in a Secret | Intentionally different | Rendered config is a ConfigMap holding **markers** (`${directory:…}`), never credential values; values stay in the mounted Secret. Strictly stronger than FIP-41's Secret-with-values. |
 | Structured listeners + advertised DNS derivation | Supported | Internal/client listeners drive Services and advertised addresses. |
 | Operator never triggers `rebalance()` in v1alpha1 | Supported | The operator never calls rebalance; evacuation stays admin-driven. |

@@ -3820,6 +3820,53 @@ spec:
               observedVersion:
                 nullable: true
                 type: string
+              restartAttemptedKeys:
+                items:
+                  type: string
+                type: array
+              restartRequiredKeys:
+                description: "Admin-rejected dynamic keys escalated to restart-bound.\
+                  \ Cleared for\na key once a restart was attempted for it (`restart_attempted_keys`)\n\
+                  or Admin finally applies it \u2014 so a persistently rejected key\
+                  \ reports\ninstead of restart-looping."
+                items:
+                  type: string
+                type: array
+              restartSeq:
+                description: 'Sequenced-restart progress, or absent when no restart
+                  is running.
+
+                  Persists across operator restarts so a new instance resumes instead
+
+                  of duplicating pod deletions. Cleared on completion.'
+                nullable: true
+                properties:
+                  doneCoordinatorOrdinals:
+                    description: Coordinator ordinals already deleted and verified
+                      new.
+                    items:
+                      format: int32
+                      type: integer
+                    type: array
+                  doneTabletOrdinals:
+                    description: Tablet ordinals already deleted and verified new.
+                    items:
+                      format: int32
+                      type: integer
+                    type: array
+                  forKeys:
+                    default: false
+                    description: 'True when the run exists only for restart-bound
+                      keys (pod hashes
+
+                      already match; completion moves them to attempted).'
+                    type: boolean
+                  targetHash:
+                    description: Combined config hash the run drives all pods to.
+                    type: string
+                required:
+                - targetHash
+                type: object
               tabletServers:
                 nullable: true
                 properties:

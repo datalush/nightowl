@@ -8,6 +8,10 @@
 # - storageclasses: read the expansion policy (get a named class, list to
 #   find the cluster default). Never modified.
 #
+# - pods: get a managed pod by computed ordinal name, delete it for a
+#   sequenced restart. Never list/watch: names are stable by construction.
+#   Never create/update: pods belong to their StatefulSet.
+#
 # Verb matrix (mirrored by a unit test — widen code and manifests together):
 # - flussclusters: read the CRs, write only .status (never spec).
 # - services, configmaps, statefulsets, poddisruptionbudgets: converge owned
@@ -45,6 +49,9 @@ rules:
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
     verbs: ["list", "patch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "delete"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list"]

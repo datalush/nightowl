@@ -127,10 +127,12 @@ pub async fn run(client: Client, namespace: Option<String>) {
                 // Retryable blocks already warned with context in
                 // `error_policy`; repeating them as errors here would
                 // turn every 60s requeue into ERROR noise.
-                Err(kube::runtime::controller::Error::ReconcilerFailed(e, _))
-                    if matches!(e, Error::RetryableBlock { .. }) =>
-                {
-                    tracing::debug!("blocked pass requeued");
+                Err(kube::runtime::controller::Error::ReconcilerFailed(e, _)) => {
+                    if matches!(e, Error::RetryableBlock { .. }) {
+                        tracing::debug!("blocked pass requeued");
+                    } else {
+                        tracing::error!(error = %e, "reconcile stream error");
+                    }
                 }
                 Err(e) => {
                     tracing::error!(error = %e, "reconcile stream error");
@@ -154,7 +156,7 @@ mod deploy_tests {
             serde_yaml::from_str(include_str!("../../deploy/clusterrole.yaml"))
                 .expect("clusterrole must parse");
         let rules = role.rules.expect("clusterrole needs rules");
-        assert_eq!(rules.len(), 10, "one rule per row of the verb matrix");
+        assert_eq!(rules.len(), 11, "one rule per row of the verb matrix");
 
         let mut remaining: Vec<(Vec<String>, Vec<String>, Vec<String>)> = rules
             .iter()
@@ -215,6 +217,7 @@ mod deploy_tests {
                 vec!["persistentvolumeclaims"],
                 vec!["list", "patch"],
             ),
+            (vec![""], vec!["pods"], vec!["delete", "get"]),
             (
                 vec!["storage.k8s.io"],
                 vec!["storageclasses"],

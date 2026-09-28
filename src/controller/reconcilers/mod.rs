@@ -12,6 +12,7 @@ pub mod coordinator_service;
 pub mod dynamic_config;
 pub mod gateway;
 pub mod pod_disruption_budget;
+pub mod restart;
 pub mod statefulset;
 pub mod status;
 pub mod tablet_service;
@@ -20,6 +21,7 @@ pub mod volume;
 use super::apply::ApplyOutcome;
 use super::fluss::TabletHealth;
 use crate::api::ClusterHealthStatus;
+use crate::api::RestartSeq;
 
 /// A fact one step observed while converging.
 pub enum Observation {
@@ -114,9 +116,29 @@ pub enum Observation {
         applied: std::collections::BTreeMap<String, String>,
     },
     /// Dynamic config refused or unappliable right now, with the reason.
-    /// Never rolls anything: the keys stay pending for the next pass.
+    /// `keys` carries the rejected key names when the server refused them
+    /// (restart-bound fallback); empty on transport failures, which simply
+    /// retry next pass. Never rolls anything directly.
     DynamicConfigBlocked {
         message: String,
+        keys: Vec<String>,
+    },
+    /// Sequenced restart stalled with the reason: which pod, what it waits
+    /// for, which budget ran out. Steady state stays silent.
+    RestartStalled {
+        message: String,
+    },
+    /// Sequenced-restart sequence after this pass: `Some` replaces the
+    /// standing run (started, advanced, or re-targeted), `None` clears a
+    /// finished or stale one. Absent means carry the standing run.
+    RestartSeqUpdate {
+        seq: Option<RestartSeq>,
+    },
+    /// A keys-driven restart sequence completed: move these keys from
+    /// restart-required to restart-attempted so a persistently rejected key
+    /// reports instead of restart-looping.
+    RestartKeysAttempted {
+        keys: Vec<String>,
     },
     /// Gateway object converged: Deployment, Service or Ingress by name.
     /// `available` carries the Deployment's available replicas and is

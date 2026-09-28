@@ -10,9 +10,10 @@
 //! - Gate: a fresh (this-pass) health observation strictly better than RED.
 //!   Anything else — no probe this pass, unreachable, RED — skips silently;
 //!   the 60s heartbeat retries without churning status.
-//! - A server rejection surfaces `DynamicConfigBlocked` naming the key and
-//!   never rolls: fail closed, retry next pass. No auto-fallback to restart
-//!   in this slice (that needs upgrade sequencing, a later j5v3 piece).
+//! - A transport failure surfaces `DynamicConfigBlocked` with no keys and
+//!   retries next pass. A server rejection surfaces the rejected key names:
+//!   the status writer escalates them to restart-bound, and the restart
+//!   sequencer picks them up.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -28,6 +29,15 @@ use crate::resources::{config_map, server_config::dynamic};
 
 const APPLY_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// A failed Admin round-trip, split so the caller can tell a retryable
+/// transport problem from a server rejection (restart-bound fallback).
+enum ApplyFailure {
+    /// Dial, admin-construct, or timeout: retry next pass, escalate nothing.
+    Transport(String),
+    /// The server refused the batch: these keys need a restart to apply.
+    Rejected { message: String },
+}
+
 /// Plan dynamic Admin operations, applying them when due.
 ///
 /// Returns observations for the status writer; empty means nothing to do
@@ -35,7 +45,12 @@ const APPLY_TIMEOUT: Duration = Duration::from_secs(10);
 pub async fn reconcile(cluster: &FlussCluster, observations: &[Observation]) -> Vec<Observation> {
     let desired = match desired_appliable(cluster) {
         Ok(desired) => desired,
-        Err(message) => return vec![Observation::DynamicConfigBlocked { message }],
+        Err(message) => {
+            return vec![Observation::DynamicConfigBlocked {
+                message,
+                keys: Vec::new(),
+            }];
+        }
     };
     let standing = cluster
         .status
@@ -64,7 +79,15 @@ pub async fn reconcile(cluster: &FlussCluster, observations: &[Observation]) -> 
                 applied: dynamic::applied_after(&standing, &set, &delete),
             }]
         }
-        Err(message) => vec![Observation::DynamicConfigBlocked { message }],
+        Err(ApplyFailure::Transport(message)) => vec![Observation::DynamicConfigBlocked {
+            message,
+            keys: Vec::new(),
+        }],
+        Err(ApplyFailure::Rejected { message }) => {
+            let mut keys: Vec<String> = set.iter().map(|(key, _)| key.clone()).collect();
+            keys.extend(delete.iter().cloned());
+            vec![Observation::DynamicConfigBlocked { message, keys }]
+        }
     }
 }
 
@@ -94,19 +117,24 @@ fn health_gate(observations: &[Observation]) -> bool {
 
 /// One Admin round-trip: sets then deletes, with an outer timeout. Any
 /// failure aborts the whole batch (nothing is recorded as applied), so a
-/// later pass retries from the standing map.
-async fn apply(bootstrap: &str, set: &[(String, String)], delete: &[String]) -> Result<(), String> {
+/// later pass retries from the standing map. Transport problems stay
+/// retryable; only a server rejection escalates to restart-bound.
+async fn apply(
+    bootstrap: &str,
+    set: &[(String, String)],
+    delete: &[String],
+) -> Result<(), ApplyFailure> {
     let run = async {
         let config = FlussConfig {
             bootstrap_servers: bootstrap.to_string(),
             ..Default::default()
         };
-        let connection = FlussConnection::new(config)
-            .await
-            .map_err(|error| format!("dynamic config dial failed: {error}"))?;
-        let admin = connection
-            .get_admin()
-            .map_err(|error| format!("dynamic config admin failed: {error}"))?;
+        let connection = FlussConnection::new(config).await.map_err(|error| {
+            ApplyFailure::Transport(format!("dynamic config dial failed: {error}"))
+        })?;
+        let admin = connection.get_admin().map_err(|error| {
+            ApplyFailure::Transport(format!("dynamic config admin failed: {error}"))
+        })?;
         let mut configs: Vec<AlterConfig> = set
             .iter()
             .map(|(key, value)| {
@@ -121,11 +149,13 @@ async fn apply(bootstrap: &str, set: &[(String, String)], delete: &[String]) -> 
         admin
             .alter_cluster_configs(configs)
             .await
-            .map_err(|error| format!("dynamic config alter rejected: {error}"))?;
+            .map_err(|error| ApplyFailure::Rejected {
+                message: format!("dynamic config alter rejected: {error}"),
+            })?;
         connection.close(Duration::from_secs(1)).await.ok();
         Ok(())
     };
     tokio::time::timeout(APPLY_TIMEOUT, run)
         .await
-        .map_err(|_| "dynamic config apply timed out".to_string())?
+        .map_err(|_| ApplyFailure::Transport("dynamic config apply timed out".to_string()))?
 }

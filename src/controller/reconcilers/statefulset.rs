@@ -434,6 +434,7 @@ fn same_statefulset(a: &StatefulSet, b: &StatefulSet) -> bool {
     a_spec.replicas == b_spec.replicas
         && a_spec.selector == b_spec.selector
         && same_template(&a_spec.template, &b_spec.template)
+        && a_spec.update_strategy == b_spec.update_strategy
         && same_claims(
             a_spec.volume_claim_templates.as_deref(),
             b_spec.volume_claim_templates.as_deref(),
@@ -487,8 +488,9 @@ fn same_claim(
 
 /// Template metadata is managed except the secret pin: labels plus our
 /// annotations compare, but the secret hash is detection-only by design —
-/// comparing it would roll pods on rotation, and restart policy is a
-/// separate decision (j5v3).
+/// rotation must not even update the template (with OnDelete nothing rolls
+/// without the sequencer anyway, and live secret volumes update on their
+/// own).
 fn same_template(a: &PodTemplateSpec, b: &PodTemplateSpec) -> bool {
     a.metadata.as_ref().map(metadata_key) == b.metadata.as_ref().map(metadata_key)
         && same_pod_spec(a.spec.as_ref(), b.spec.as_ref())

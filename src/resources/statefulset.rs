@@ -189,6 +189,15 @@ impl<'a> Build<'a> {
                 service_name: Some(self.service_name.clone()),
                 template: self.pod_template()?,
                 volume_claim_templates: self.claims(),
+                // OnDelete on purpose: template updates (config hash,
+                // image) must never roll pods behind the restart
+                // sequencer's back. Every restart is a sequenced,
+                // health-gated pod delete (j5v3); Kubernetes only
+                // recreates what the sequencer deletes.
+                update_strategy: Some(k8s_openapi::api::apps::v1::StatefulSetUpdateStrategy {
+                    type_: Some("OnDelete".to_string()),
+                    rolling_update: None,
+                }),
                 persistent_volume_claim_retention_policy: Some(
                     k8s_openapi::api::apps::v1::StatefulSetPersistentVolumeClaimRetentionPolicy {
                         when_deleted: Some("Retain".to_string()),
