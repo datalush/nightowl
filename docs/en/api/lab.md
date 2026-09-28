@@ -61,6 +61,7 @@ Remove both when the test ends (`ip route del`, delete the hosts lines). Test fa
 | Reference Fluss (chart / app) | fluss-1.0.0 / `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.3` (StatefulSet template; reference rollout remains blocked) |
 | Previous operator-owned drill | `rst-drill`, image `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.4`; snapshot download worked but recovery failed after disk loss |
 | Verified operator-owned restore drill | `rst-drill5`, image `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.5`, built from fork `develop` `d2a1f4382629f8057b8fb0a2cf6b74c90cfb51f3` |
+| RF=2 follower drill | `rst-rf2`, image `.5`, dedicated remote prefix; replacement follower promoted and restored 50/50 KV rows |
 | Remote storage | External RustFS 1.0.0 (out-of-band lab hardware) |
 
 Refresh this table whenever the lab moves. The reference `fluss` namespace is a fixed Helm install for comparison; operator tests run exclusively in `operator-dev`.
@@ -72,6 +73,12 @@ In a fresh `rst-drill5` cluster with a dedicated `clusters/operator-dev/rst-dril
 The tabletserver PVC (`a09176b1-b65f-4736-a0ea-f2cae95efbf3`, volume with the same suffix) and pod were deleted. Kubernetes created a new PVC (`87bd588b-c734-4196-b6e3-fd95f9a279ec`) and pod; Fluss logged snapshot download and recovery from offset 50 on the replacement disk. The native client again verified **the same 50 keys and exact values**. Ten subsequent writes succeeded; all **60/60** keys and values were read back. The recovered tablet completed a further remote snapshot (ID 1).
 
 Fluss reported `GREEN`, 1/1 leader and replicas, together with persistent `data_at_risk=true`; Night Owl pinned to `d2a1f438` reported `DataAtRisk=True` / `SnapshotRecoveryUnverified` even with a healthy live leader. The marker is intentional: RF=1 cannot prove that no acknowledged writes existed beyond the latest durable snapshot or remote-log offset. This drill does not establish zero-RPO recovery. Snapshots produced by `.4` lack the writer checkpoint required to restore an empty log with `.5`; the test created its snapshot on `.5`.
+
+### RF=2 follower replacement and promotion, 2026-09-28
+
+The separate `rst-rf2` cluster used image `.5`, a dedicated `clusters/operator-dev/rst-rf2` S3 prefix, two tabletservers and a one-bucket RF=2 table `rf2drill.kv`. Tabletserver 0 led and tabletserver 1 followed at ISR 2/2. A native client verified 50/50 exact keys and values; remote snapshot 0 contained 50 rows at offset 50 with `_WRITER_STATE`.
+
+Only the follower's disk and pod were replaced: PVC `95695e67-ee41-4519-abef-15c4dce13d59` became `d9a3ca49-3a44-42c9-878d-7747fbac1c95`, and the follower returned to ISR 2/2. Deleting leader 0's **pod** (not its PVC) then caused tabletserver 1 to become leader at epoch 1. It downloaded snapshot 0 from S3, recovered KV from offset 50, and served all 50 exact keys and values. The Gateway's first ten post-failover requests reported errors; after retrying, ten new keys were written and **60/60** exact values verified. The promoted leader completed snapshot 1 (`row_count=60`, `log_offset=80`, writer checkpoint present); offsets count WAL activity, not distinct KV keys. Final observed health: GREEN, ISR 2/2, `data_at_risk=false`, Night Owl `DataAtRisk=False`. This verifies follower replacement and promotion, not simultaneous loss of both replicas.
 
 ## Lab metrics (Prometheus)
 
