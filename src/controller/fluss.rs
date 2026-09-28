@@ -236,6 +236,7 @@ fn snapshot(
                 num_leader_replicas: health.num_leader_replicas,
                 active_leader_replicas: health.active_leader_replicas,
             },
+            data_at_risk: health.data_at_risk,
         },
         coordinator_endpoints: coordinators.clone(),
         coordinator_ready: coordinators.len() as i32,
@@ -279,6 +280,7 @@ mod tests {
             num_leader_replicas: 2,
             active_leader_replicas: 2,
             status,
+            data_at_risk: Some(false),
         }
     }
 

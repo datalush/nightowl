@@ -48,18 +48,27 @@ Retira ambas al terminar (`ip route del`, borrar las líneas de hosts). Los fall
 - **Un test**: borrar el CR, luego todos los PVCs y el Secret efímero en `operator-dev`; parar el operador; retirar ruta y líneas de hosts. El namespace debe quedar vacío (`kubectl get all,pdb,pvc,secrets -n operator-dev` no muestra nada).
 - **Lab completo**: `k3d cluster delete lab` y seguir “Recrear desde cero”. Esto borra también el clúster de referencia y la metadata de ZooKeeper —solo hacerlo a propósito.
 
-## Registro de versiones (verificado en vivo 2026-09-27)
+## Registro de versiones (entorno verificado el 2026-09-27; drill de restore el 2026-09-28)
 
 | Componente | Versión |
 | --- | --- |
 | k3d | v5.9.0 |
 | Kubernetes (k3s) | v1.35.5+k3s1 (1 server + 3 agents) |
 | ZooKeeper (chart Bitnami / app) | zookeeper-0.15.0 / 3.9.5 |
-| Fluss de referencia (chart / app) | fluss-1.0.0 / `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.4` (rodado el 2026-09-28, antes `1.0.0-midnattsol.3`) |
-| Imagen bajo prueba | `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.4` vía `spec.version` del CR |
+| Fluss de referencia (chart / app) | fluss-1.0.0 / `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.3` (plantilla StatefulSet; el rollout de referencia sigue bloqueado) |
+| Drill anterior gestionado por el operador | `rst-drill`, imagen `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.4`; se descargó el snapshot, pero falló la recuperación tras perder el disco |
+| Drill de restore verificado | `rst-drill5`, imagen `ghcr.io/midnattsol/fluss:1.0.0-midnattsol.5`, construida desde `develop` del fork `d2a1f4382629f8057b8fb0a2cf6b74c90cfb51f3` |
 | Almacenamiento remoto | RustFS 1.0.0 externo (hardware del lab, fuera de banda) |
 
 Refresca esta tabla cada vez que el lab se mueva. El namespace `fluss` de referencia es una instalación Helm fija para comparar; los tests del operador corren exclusivamente en `operator-dev`.
+
+### Restore tras pérdida de disco RF=1, 2026-09-28
+
+En un clúster nuevo `rst-drill5`, con prefijo S3 exclusivo `clusters/operator-dev/rst-drill5`, Gateway escribió 50 filas KV en `rst5.kv`. Un cliente nativo comprobó **las 50 claves y sus valores de texto exactos**. El snapshot 0 en RustFS registró `row_count=50`, `log_offset=50`, `_METADATA` y `_WRITER_STATE`.
+
+Se borraron el PVC del tabletserver (`a09176b1-b65f-4736-a0ea-f2cae95efbf3`, volumen con el mismo sufijo) y el pod. Kubernetes creó otro PVC (`87bd588b-c734-4196-b6e3-fd95f9a279ec`) y pod; Fluss registró la descarga del snapshot y la recuperación desde offset 50 en el disco nuevo. El cliente volvió a leer **las mismas 50 claves y valores exactos**. Después se escribieron diez filas más y se comprobaron **60/60** claves y valores. El tablet recuperado completó otro snapshot remoto (ID 1).
+
+Fluss informó `GREEN`, líder 1/1 y réplicas 1/1, junto con `data_at_risk=true` persistente; Night Owl fijado a `d2a1f438` informó `DataAtRisk=True` / `SnapshotRecoveryUnverified` aunque hubiera un líder sano. La señal es intencionada: con RF=1 no se puede demostrar que no existieran escrituras reconocidas después del último offset duradero del snapshot o log remoto. Este drill no demuestra RPO cero. Los snapshots hechos con `.4` carecen del checkpoint de escritores necesario para restaurar un log vacío con `.5`; este test creó su snapshot con `.5`.
 
 ## Métricas del lab (Prometheus)
 

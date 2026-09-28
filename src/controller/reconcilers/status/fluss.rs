@@ -140,16 +140,22 @@ pub(super) fn conditions(
                 counts.clone(),
                 vec![counts],
             ));
-            // Total loss watch: RED health with hosted replicas but zero
-            // active leaders means no live copy of some data. Report only:
-            // the operator retries nothing and moves no bytes, and Fluss
-            // 1.0 offers no restore primitive to orchestrate.
-            let data_at_risk = matches!(health.status, ClusterHealthState::Red)
+            let no_live_replica = matches!(health.status, ClusterHealthState::Red)
                 && health.replicas.num_replicas > 0
                 && health.replicas.active_leader_replicas == 0;
-            if data_at_risk {
+            if health.data_at_risk == Some(true) {
+                let message = "Fluss recorded recovery after local log loss; writes beyond the recovered snapshot or remote-log offset cannot be verified".to_string();
+                conditions.push(condition(
+                    cluster,
+                    FlussConditionType::DataAtRisk,
+                    ConditionStatus::True,
+                    "SnapshotRecoveryUnverified".to_string(),
+                    message.clone(),
+                    vec!["GetClusterHealth.data_at_risk=true".to_string(), message],
+                ));
+            } else if no_live_replica {
                 let message = format!(
-                    "no active leaders for {} hosted replicas ({} in sync): data unreadable until a replica recovers; no automatic restore exists",
+                    "no active leaders for {} hosted replicas ({} in sync): data unreadable until a replica recovers",
                     health.replicas.num_replicas, health.replicas.in_sync_replicas,
                 );
                 conditions.push(condition(
@@ -160,7 +166,7 @@ pub(super) fn conditions(
                     message.clone(),
                     vec![message],
                 ));
-            } else {
+            } else if health.data_at_risk == Some(false) {
                 conditions.push(condition(
                     cluster,
                     FlussConditionType::DataAtRisk,
@@ -169,6 +175,19 @@ pub(super) fn conditions(
                     "every hosted replica set has an active leader".to_string(),
                     Vec::new(),
                 ));
+            } else {
+                let previous_risk = carried(cluster, &FlussConditionType::DataAtRisk)
+                    .filter(|standing| standing.status == ConditionStatus::True);
+                conditions.push(previous_risk.unwrap_or_else(|| {
+                    condition(
+                        cluster,
+                        FlussConditionType::DataAtRisk,
+                        ConditionStatus::Unknown,
+                        "RecoveryEvidenceUnavailable".to_string(),
+                        "Fluss did not report persistent recovery evidence".to_string(),
+                        vec!["GetClusterHealth.data_at_risk absent".to_string()],
+                    )
+                }));
             }
         }
         (None, Some(message)) => {
@@ -219,6 +238,7 @@ mod tests {
                     num_leader_replicas: active_leaders,
                     active_leader_replicas: active_leaders,
                 },
+                data_at_risk: Some(false),
             },
             coordinator_endpoints: vec!["coord:9123".to_string()],
             coordinator_ready: 1,
@@ -263,6 +283,30 @@ mod tests {
                 .expect("DataAtRisk always reported on a fresh probe");
             assert_eq!(condition.status, ConditionStatus::False);
         }
+    }
+
+    #[test]
+    fn green_with_persisted_recovery_still_reports_risk() {
+        let cluster = spike_cluster();
+        let mut observation = health(ClusterHealthState::Green, 1, 1);
+        if let Observation::FlussHealth { health, .. } = &mut observation {
+            health.data_at_risk = Some(true);
+        }
+        let condition = data_at_risk(&cluster, &[observation]).expect("risk reported");
+        assert_eq!(condition.status, ConditionStatus::True);
+        assert_eq!(condition.reason, "SnapshotRecoveryUnverified");
+    }
+
+    #[test]
+    fn old_server_without_recovery_evidence_is_unknown() {
+        let cluster = spike_cluster();
+        let mut observation = health(ClusterHealthState::Green, 1, 1);
+        if let Observation::FlussHealth { health, .. } = &mut observation {
+            health.data_at_risk = None;
+        }
+        let condition = data_at_risk(&cluster, &[observation]).expect("risk reported");
+        assert_eq!(condition.status, ConditionStatus::Unknown);
+        assert_eq!(condition.reason, "RecoveryEvidenceUnavailable");
     }
 
     #[test]

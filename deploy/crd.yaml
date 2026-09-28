@@ -3700,6 +3700,10 @@ spec:
                   activeLeaderReplicas:
                     format: int32
                     type: integer
+                  dataAtRisk:
+                    description: Present only when the server reports persistent recovery evidence.
+                    nullable: true
+                    type: boolean
                   inSyncReplicas:
                     format: int32
                     type: integer

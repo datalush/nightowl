@@ -544,6 +544,13 @@ pub struct ClusterHealthStatus {
     pub status: ClusterHealthState,
     #[serde(flatten)]
     pub replicas: ReplicaHealth,
+    /// Present only when the server reports persistent recovery evidence.
+    #[serde(
+        rename = "dataAtRisk",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub data_at_risk: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
