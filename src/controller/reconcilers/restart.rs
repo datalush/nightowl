@@ -354,15 +354,14 @@ pub async fn reconcile(
     // observed means nothing verified yet — the verification emission
     // below populates it, no preflight needed. Image drift itself needs
     // no special trigger: pods running another image simply never verify.
-    if let Some(observed) = cluster
+    if let Some(message) = cluster
         .status
         .as_ref()
         .and_then(|s| s.observed_version.clone())
         .filter(|observed| *observed != cluster.spec.version)
+        .and_then(|observed| upgrade_preflight(&cluster.spec.version, &observed).err())
     {
-        if let Err(message) = upgrade_preflight(&cluster.spec.version, &observed) {
-            return Ok(vec![Observation::RestartStalled { message }]);
-        }
+        return Ok(vec![Observation::RestartStalled { message }]);
     }
     if !fresh_green(observations) {
         // A live run holding for health explains itself; a quiet cluster

@@ -584,6 +584,11 @@ pub enum FlussConditionType {
     Upgrading,
     Stalled,
     Degraded,
+    /// Data with no live replica: RED health with tablets registered but
+    /// zero active leaders. Observe-and-report only: the operator retries
+    /// nothing and moves no bytes; recovery needs a server-side restore
+    /// primitive Fluss 1.0 does not provide.
+    DataAtRisk,
     Adoptable,
     KubernetesResourcesReady,
     ZooKeeperReachable,

@@ -140,6 +140,36 @@ pub(super) fn conditions(
                 counts.clone(),
                 vec![counts],
             ));
+            // Total loss watch: RED health with hosted replicas but zero
+            // active leaders means no live copy of some data. Report only:
+            // the operator retries nothing and moves no bytes, and Fluss
+            // 1.0 offers no restore primitive to orchestrate.
+            let data_at_risk = matches!(health.status, ClusterHealthState::Red)
+                && health.replicas.num_replicas > 0
+                && health.replicas.active_leader_replicas == 0;
+            if data_at_risk {
+                let message = format!(
+                    "no active leaders for {} hosted replicas ({} in sync): data unreadable until a replica recovers; no automatic restore exists",
+                    health.replicas.num_replicas, health.replicas.in_sync_replicas,
+                );
+                conditions.push(condition(
+                    cluster,
+                    FlussConditionType::DataAtRisk,
+                    ConditionStatus::True,
+                    "NoLiveReplica".to_string(),
+                    message.clone(),
+                    vec![message],
+                ));
+            } else {
+                conditions.push(condition(
+                    cluster,
+                    FlussConditionType::DataAtRisk,
+                    ConditionStatus::False,
+                    "ReplicasLive".to_string(),
+                    "every hosted replica set has an active leader".to_string(),
+                    Vec::new(),
+                ));
+            }
         }
         (None, Some(message)) => {
             conditions.push(condition(
@@ -153,11 +183,94 @@ pub(super) fn conditions(
             if let Some(standing) = carried(cluster, &FlussConditionType::ClusterHealthy) {
                 conditions.push(standing);
             }
+            if let Some(standing) = carried(cluster, &FlussConditionType::DataAtRisk) {
+                conditions.push(standing);
+            }
         }
         (None, None) => {
             conditions.extend(carried(cluster, &FlussConditionType::FlussReachable));
             conditions.extend(carried(cluster, &FlussConditionType::ClusterHealthy));
+            conditions.extend(carried(cluster, &FlussConditionType::DataAtRisk));
         }
     }
     conditions
+}
+
+#[cfg(test)]
+mod tests {
+    use super::conditions;
+    use crate::api::{
+        ClusterHealthState, ClusterHealthStatus, ConditionStatus, FlussConditionType, ReplicaHealth,
+    };
+    use crate::controller::reconcilers::Observation;
+
+    fn spike_cluster() -> crate::api::FlussCluster {
+        serde_yaml::from_str(include_str!("../../../../../lab2/demo.yml"))
+            .expect("lab2 demo CR must deserialize")
+    }
+
+    fn health(status: ClusterHealthState, num_replicas: i32, active_leaders: i32) -> Observation {
+        Observation::FlussHealth {
+            health: ClusterHealthStatus {
+                status,
+                replicas: ReplicaHealth {
+                    num_replicas,
+                    in_sync_replicas: num_replicas,
+                    num_leader_replicas: active_leaders,
+                    active_leader_replicas: active_leaders,
+                },
+            },
+            coordinator_endpoints: vec!["coord:9123".to_string()],
+            coordinator_ready: 1,
+            tablet_uids: vec!["ts-0".to_string()],
+            tablet_health: Vec::new(),
+        }
+    }
+
+    fn data_at_risk(
+        cluster: &crate::api::FlussCluster,
+        observations: &[Observation],
+    ) -> Option<crate::api::FlussClusterCondition> {
+        conditions(cluster, observations)
+            .into_iter()
+            .find(|c| c.condition_type == FlussConditionType::DataAtRisk)
+    }
+
+    #[test]
+    fn red_without_active_leaders_reports_data_at_risk() {
+        let cluster = spike_cluster();
+        let observations = vec![health(ClusterHealthState::Red, 4, 0)];
+        let condition = data_at_risk(&cluster, &observations)
+            .expect("DataAtRisk always reported on a fresh probe");
+        assert_eq!(condition.status, ConditionStatus::True);
+        assert_eq!(condition.reason, "NoLiveReplica");
+        assert!(
+            condition.message.contains('4'),
+            "evidence names the replica count, got: {}",
+            condition.message
+        );
+    }
+
+    #[test]
+    fn green_or_active_leaders_read_clear() {
+        let cluster = spike_cluster();
+        for observations in [
+            vec![health(ClusterHealthState::Green, 4, 2)],
+            vec![health(ClusterHealthState::Red, 4, 2)],
+            vec![health(ClusterHealthState::Yellow, 0, 0)],
+        ] {
+            let condition = data_at_risk(&cluster, &observations)
+                .expect("DataAtRisk always reported on a fresh probe");
+            assert_eq!(condition.status, ConditionStatus::False);
+        }
+    }
+
+    #[test]
+    fn no_phantom_condition_without_observations() {
+        let cluster = spike_cluster();
+        assert!(
+            data_at_risk(&cluster, &[]).is_none(),
+            "nothing standing on a fresh cluster, nothing carried"
+        );
+    }
 }

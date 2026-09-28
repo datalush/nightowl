@@ -3757,6 +3757,7 @@ spec:
                       - ClusterHealthy
                       - S3CredentialsStale
                       - OperationBlocked
+                      - DataAtRisk
                       type: string
                   required:
                   - lastTransitionTime
