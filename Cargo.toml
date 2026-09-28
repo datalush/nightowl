@@ -6,7 +6,7 @@ license = "AGPL-3.0-only"
 description = "Kubernetes operator for Apache Fluss (FlussCluster)"
 
 [dependencies]
-fluss-rs = { version = "1.0.0", git = "https://github.com/midnattsol/fluss.git", rev = "ba3761a20562edd94cdede8b0a8d8ba1031d1681" }
+fluss-rs = { version = "1.0.0", git = "https://github.com/midnattsol/fluss.git", rev = "d00c451f9aed0cca77df4224b1fdf52654711f12" }
 chrono = "0.4"
 kube = { version = "4.2", features = ["derive", "runtime"] }
 k8s-openapi = { version = "0.28", features = ["v1_32", "schemars"] }
