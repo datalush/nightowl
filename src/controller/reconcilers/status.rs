@@ -12,7 +12,9 @@
 //! only orchestrates: assemble the pieces, write when changed.
 
 mod common;
+mod external;
 mod fluss;
+mod native_routes;
 mod resources;
 mod storage;
 
@@ -75,6 +77,7 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
         ),
     ];
     conditions.extend(fluss::conditions(cluster, observations));
+    conditions.extend(native_routes::condition(cluster, observations));
     conditions.extend(storage::secret_condition(cluster, observations));
     // Dynamic config: a rejection is a stall the status must explain (j5v3);
     // applied hashes replace the field wholesale when this pass applied.
@@ -184,6 +187,7 @@ fn desired_status(cluster: &FlussCluster, observations: &[Observation]) -> Fluss
     }
 
     FlussClusterStatus {
+        external_endpoints: external::endpoints(cluster, observations),
         observed_generation: cluster.metadata.generation,
         observed_version: observations
             .iter()

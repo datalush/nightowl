@@ -1,8 +1,8 @@
 # FlussCluster
 
-`FlussCluster` es un recurso personalizado de Kubernetes limitado a un namespace, con `apiVersion: fluss.datalush.com/v1alpha1`. Su definición canónica está en `operator/src/api.rs`. La CRD se registra para todo el clúster de Kubernetes, pero cada instancia pertenece a un namespace. En el futuro, el controlador creará los recursos de cada instancia en ese mismo namespace y derivará sus nombres de `metadata.name`.
+`FlussCluster` es un recurso personalizado de Kubernetes limitado a un namespace, con `apiVersion: fluss.datalush.com/v1alpha1`. Su definición canónica está en `operator/src/api.rs`. La CRD se registra para todo el clúster de Kubernetes, pero cada instancia pertenece a un namespace. El controlador crea sus recursos en ese mismo namespace y deriva sus nombres de `metadata.name`.
 
-> **Contrato frente a controlador:** ya existen los tipos Rust y el esquema. El programa actual no crea cargas de trabajo ni aplica las reglas operativas descritas aquí. Consulta el [estado actual](../current-state.md).
+> Instalar el CRD generado por la versión del operador que se ejecuta. Consultar la [evidencia de laboratorio](lab.md) para comportamientos y versiones verificados.
 
 ## Campos principales de spec
 
@@ -14,7 +14,8 @@
 | `coordinator` | objeto | Sí | Réplicas de CoordinatorServer y recursos de los pods. |
 | `tabletServers` | objeto | Sí | Réplicas de TabletServer, recursos de los pods y PVC locales. |
 | `remoteStorage` | objeto | Sí | Almacenamiento remoto compartido; la API actual ofrece S3. |
-| `listeners` | objeto | No | Nombres y puertos de los listeners interno y cliente; acceso interno al clúster. |
+| `listeners` | objeto | No | Defaults de INTERNAL/CLIENT y endpoints públicos TLS/SNI opcionales; los CR antiguos no adquieren acceso público. |
+| `security.saslPlain` | objeto | No | Secret con usuarios nativos y superusuario ACL, obligatorio al configurar acceso público. |
 | `podDisruptionBudget` | objeto | No | Políticas de interrupciones voluntarias para ambos componentes. |
 | `rollingUpgrade` | objeto | No | Tiempos para restarts ordenados y conscientes de Fluss (tablets de la cola primero, luego coordinator, con GREEN y estabilización). |
 | `scaleIn` | objeto | No | Política de seguridad al retirar un TabletServer. |
@@ -61,7 +62,7 @@ La ubicación admite `spreadAcrossNodes` (booleano), `nodeSelector` (mapa de cad
 
 ## Listeners e interrupciones
 
-`listeners.internal` exige `name` y `port`. `listeners.client` exige `name`, `port` y `serviceType`; esta versión de la API solo admite `ClusterIP`. Si se configura `listeners`, ambos objetos son obligatorios. Los puertos deben estar entre 1 y 65535; los nombres deberían ser distintos. El futuro controlador deberá generar Services y configuración del servidor a partir de **los mismos valores** y derivar `advertised.listeners` del DNS de cada pod. El acceso de clientes externos aún no está modelado.
+`listeners.internal` y `listeners.client` utilizan INTERNAL:9123 y CLIENT:9124 si se omiten. `listeners.external` exige `domain`, `gateway.className` y `tls.secretName`; genera bootstrap y nombres por servidor en una sola IP/puerto con Envoy TLS passthrough. `security.saslPlain` referencia el Secret `credentials` y declara `adminUser`; los workloads públicos esperan a que existan los Secrets TLS y SASL. Consultar [acceso nativo externo](native-external-access.md) para configuración, DNS dividido y pruebas. `status.externalEndpoints` indica Services convergidos y `NativeRoutesProgrammed` condiciones Gateway API, no accesibilidad externa demostrada.
 
 `podDisruptionBudget.tabletServers` exige `enabled` y `maxUnavailable` (entero ≥ 0). Su `coordinator` opcional exige `enabled` y `minAvailable` (entero ≥ 1). Para tablets, `maxUnavailable: 0` bloquea las evacuaciones mediante la API de eviction, pero **no** impide borrar directamente un pod. Si se omite `podDisruptionBudget`, el esquema aún no establece ningún valor por defecto. El futuro controlador debería usar `maxUnavailable: 0` por defecto para TabletServers.
 
@@ -102,6 +103,10 @@ Si se incluye `defaults`, `tableBuckets` y `logReplicationFactor` son obligatori
 `observability.prometheus` es booleano con predeterminado `true`: el Operador genera `metrics.reporters: prometheus` en la config base e inyecta las anotaciones `prometheus.io/scrape` más `port` en los pod templates de Coordinator y TabletServers, derivando el puerto de las propiedades efectivas fusionadas (un override del usuario a la clave del puerto se respeta; cambiar la clave de reporters fuera de prometheus retira las anotaciones). Un `false` explícito desactiva todo. No se crea Service ni ServiceMonitor de métricas —eso pertenece al empaquetado. `configurationOverrides` puede establecerse globalmente y por componente, con nombres de propiedades Fluss y valores de tipo **cadena**, por ejemplo `kv.snapshot.interval: "10min"`. Los valores específicos del componente prevalecen sobre los globales. No pongas credenciales en ninguno de ellos. El reconciler **aplica** la propiedad de claves: las de identidad, topología, credenciales, cableado de almacenamiento y defaults renderizados (listeners, identidad de TabletServer, ruta ZooKeeper, propiedades S3, `data.dir`, defaults de tabla) se rechazan con estado `ConfigBlocked` que nombra la clave; las de afinado (`kv.*`, `netty.*`, …) y las futuras desconocidas pasan. Las claves dinámicas (la allowlist viva de Fluss 1.0: `kv.snapshot.interval`, `datalake.*` y pares, espejada en código) compartidas con valores idénticos por coordinator y tablets se aplican vía Admin sin reinicios; valores divergentes por rol y todo lo demás pasan por restarts secuenciados (los StatefulSets van en OnDelete; el operador borra pods uno a uno con gates de salud, jamás rolling nativo de Kubernetes). Los valores dinámicos aplicados se registran como hashes en `status.appliedDynamicConfig`; un rechazo del servidor aparece como `OperationBlocked` nombrando la clave y escala a restart-bound (reintentado tras un restart secuenciado; claves persistentemente rechazadas siguen reportando en vez de repetirse).
 
 `gateway` es opt-in (`enabled: false` por defecto): activado, el Operador despliega un Deployment del Gateway con imagen stock (env de bootstrap al coordinator del clúster) más un Service ClusterIP más probes, y un objeto Ingress si se fija `gateway.ingress`. El tag de imagen es por defecto el mate de la release (`apache/fluss-gateway:<spec.version>`) y se puede cambiar — sin matriz de versiones cableada. El Ingress lleva el `host` declarado, `className` opcional (literal) y `tlsSecretName` opcional, que debe existir ya en el namespace o el paso rehúsa con evidencia `GatewayBlocked`; TLS, DNS y auth viven en el entorno, jamás en el operador. Desactivar recoge los tres objetos; `status.gateway` informa deseadas/listas más la URL interna, o queda ausente.
+
+El Gateway HTTP es incompatible con `security.saslPlain`: no propaga el
+principal nativo del llamante y el CRD impide habilitarlos conjuntamente.
+El Gateway API con routing SNI nativo es un recurso distinto.
 
 Las puertas exteriores por tenant usan el mismo objeto sin código nuevo: `host` admite literales wildcard (p. ej. `*.example.com`, lo casa el controlador), y la automatización TLS se parte por capas — el lado entrega (un `Certificate` de cert-manager, pipeline o manual) crea el secreto, el operador solo lo referencia y verifica (`GatewayBlocked` si falta). Verificado con Traefik: host wildcard más certificado real sirve HTTPS de punta a punta, writes incluidos. Ningún nombre de tenant, vendor o SaaS pertenece al operador: los hosts son dato de usuario.
 

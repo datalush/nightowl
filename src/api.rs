@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use k8s_openapi::api::core::v1::{
     Affinity, PodSecurityContext, Toleration, TopologySpreadConstraint,
@@ -20,6 +21,12 @@ use serde::{Deserialize, Serialize};
 #[schemars(extend("x-kubernetes-validations" = [{
     "rule": "!has(self.defaults) || self.defaults.logReplicationFactor <= self.tabletServers.replicas",
     "message": "logReplicationFactor must not exceed tabletServers replicas"
+}, {
+    "rule": "!has(oldSelf.listeners) || !has(oldSelf.listeners.external) || (has(self.listeners) && has(self.listeners.external))",
+    "message": "public native access cannot be removed from a running FlussCluster"
+}, {
+    "rule": "!has(self.security) || !has(self.gateway) || !self.gateway.enabled",
+    "message": "the HTTP Gateway cannot share the native per-user ACL listener"
 }]))]
 #[serde(rename_all = "camelCase")]
 pub struct FlussClusterSpec {
@@ -29,6 +36,9 @@ pub struct FlussClusterSpec {
     pub coordinator: CoordinatorSpec,
     pub tablet_servers: TabletServersSpec,
     pub remote_storage: RemoteStorageSpec,
+    /// Native users, authenticated by Fluss and authorized by its ACLs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<NativeSecuritySpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listeners: Option<ListenersSpec>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -48,6 +58,21 @@ pub struct FlussClusterSpec {
     pub gateway: Option<GatewaySpec>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub configuration_overrides: BTreeMap<String, String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSecuritySpec {
+    pub sasl_plain: SaslPlainSpec,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SaslPlainSpec {
+    /// Secret in the FlussCluster namespace; key `credentials` holds the user:password map.
+    pub credentials_secret_name: String,
+    /// One superuser used to administer ACLs; credentials come from the same Secret.
+    pub admin_user: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -226,8 +251,120 @@ pub struct PodTemplateSpec {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ListenersSpec {
+    #[serde(default = "default_internal_listener")]
     pub internal: ListenerSpec,
+    #[serde(default = "default_client_listener")]
     pub client: ClientListenerSpec,
+    /// Public native listener behind SNI routing and per-server TLS sidecars.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<ExternalListenerSpec>,
+}
+
+static DEFAULT_LISTENERS: OnceLock<ListenersSpec> = OnceLock::new();
+
+impl FlussClusterSpec {
+    /// Existing CRs may omit listeners; resolve them without changing their stored spec.
+    pub fn resolved_listeners(&self) -> &ListenersSpec {
+        self.listeners
+            .as_ref()
+            .unwrap_or_else(|| DEFAULT_LISTENERS.get_or_init(ListenersSpec::default))
+    }
+}
+
+impl Default for ListenersSpec {
+    fn default() -> Self {
+        Self {
+            internal: default_internal_listener(),
+            client: default_client_listener(),
+            external: None,
+        }
+    }
+}
+
+fn default_internal_listener() -> ListenerSpec {
+    ListenerSpec {
+        name: "INTERNAL".into(),
+        port: 9123,
+    }
+}
+
+fn default_client_listener() -> ClientListenerSpec {
+    ClientListenerSpec {
+        name: "CLIENT".into(),
+        port: 9124,
+        service_type: ClientServiceType::ClusterIP,
+        annotations: BTreeMap::new(),
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalListenerSpec {
+    /// Advanced: override the generated Fluss listener name (EXTERNAL).
+    #[serde(default = "default_external_listener_name")]
+    pub name: String,
+    /// Advanced: override the Fluss pod-side listener port (9125).
+    #[serde(default = "default_external_listener_port")]
+    #[schemars(range(min = 1, max = 65535))]
+    pub port: i32,
+    /// Public DNS suffix; server names are generated from this value.
+    #[schemars(
+        length(min = 1, max = 253),
+        regex(pattern = "^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$")
+    )]
+    pub domain: String,
+    pub gateway: ExternalGatewaySpec,
+    pub tls: ExternalTlsSpec,
+    #[serde(default)]
+    pub dns: ExternalDnsSpec,
+    /// Advanced: override the public port (443).
+    #[serde(default = "default_external_public_port")]
+    #[schemars(range(min = 1, max = 65535))]
+    pub public_port: i32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalGatewaySpec {
+    pub class_name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalTlsSpec {
+    pub secret_name: String,
+    /// Override the operator-tested Envoy sidecar image.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalDnsSpec {
+    #[serde(default)]
+    pub internal_mapping: bool,
+}
+
+fn default_external_listener_name() -> String {
+    "EXTERNAL".into()
+}
+
+fn default_external_listener_port() -> i32 {
+    9125
+}
+
+fn default_external_public_port() -> i32 {
+    443
+}
+
+/// Configured external mapping with a reconciled Service, not a reachability claim.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExternalEndpointStatus {
+    pub pod: String,
+    pub service: String,
+    pub address: String,
+    pub role: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
@@ -243,7 +380,7 @@ pub struct ClientListenerSpec {
     pub name: String,
     #[schemars(range(min = 1, max = 65535))]
     pub port: i32,
-    /// Only in-cluster clients are supported by this API version.
+    /// The CLIENT Service stays internal; external access uses its own listener.
     pub service_type: ClientServiceType,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub annotations: BTreeMap<String, String>,
@@ -442,6 +579,10 @@ fn default_true() -> bool {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FlussClusterStatus {
+    /// Configured mappings whose Services converged in this reconciliation.
+    /// External routes and network reachability are managed and verified separately.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub external_endpoints: Vec<ExternalEndpointStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub observed_generation: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -598,6 +739,8 @@ pub enum FlussConditionType {
     DataAtRisk,
     Adoptable,
     KubernetesResourcesReady,
+    /// Gateway API accepted and programmed every native SNI route (not an external dial test).
+    NativeRoutesProgrammed,
     ZooKeeperReachable,
     RemoteStorageReady,
     FlussReachable,

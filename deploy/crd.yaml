@@ -1796,6 +1796,10 @@ spec:
                 nullable: true
                 properties:
                   client:
+                    default:
+                      name: CLIENT
+                      port: 9124
+                      serviceType: ClusterIP
                     properties:
                       annotations:
                         additionalProperties:
@@ -1809,8 +1813,8 @@ spec:
                         minimum: 1.0
                         type: integer
                       serviceType:
-                        description: Only in-cluster clients are supported by this
-                          API version.
+                        description: The CLIENT Service stays internal; external access
+                          uses its own listener.
                         enum:
                         - ClusterIP
                         type: string
@@ -1819,7 +1823,74 @@ spec:
                     - port
                     - serviceType
                     type: object
+                  external:
+                    description: Public native listener behind SNI routing and per-server
+                      TLS sidecars.
+                    nullable: true
+                    properties:
+                      dns:
+                        default:
+                          internalMapping: false
+                        properties:
+                          internalMapping:
+                            default: false
+                            type: boolean
+                        type: object
+                      domain:
+                        description: Public DNS suffix; server names are generated
+                          from this value.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$
+                        type: string
+                      gateway:
+                        properties:
+                          className:
+                            type: string
+                        required:
+                        - className
+                        type: object
+                      name:
+                        default: EXTERNAL
+                        description: 'Advanced: override the generated Fluss listener
+                          name (EXTERNAL).'
+                        type: string
+                      port:
+                        default: 9125
+                        description: 'Advanced: override the Fluss pod-side listener
+                          port (9125).'
+                        format: int32
+                        maximum: 65535.0
+                        minimum: 1.0
+                        type: integer
+                      publicPort:
+                        default: 443
+                        description: 'Advanced: override the public port (443).'
+                        format: int32
+                        maximum: 65535.0
+                        minimum: 1.0
+                        type: integer
+                      tls:
+                        properties:
+                          image:
+                            description: Override the operator-tested Envoy sidecar
+                              image.
+                            nullable: true
+                            type: string
+                          secretName:
+                            type: string
+                        required:
+                        - secretName
+                        type: object
+                    required:
+                    - domain
+                    - gateway
+                    - tls
+                    type: object
                   internal:
+                    default:
+                      name: INTERNAL
+                      port: 9123
                     properties:
                       name:
                         type: string
@@ -1832,9 +1903,6 @@ spec:
                     - name
                     - port
                     type: object
-                required:
-                - client
-                - internal
                 type: object
               observability:
                 nullable: true
@@ -1991,6 +2059,28 @@ spec:
                     type: string
                 required:
                 - onNonEmptyTabletServer
+                type: object
+              security:
+                description: Native users, authenticated by Fluss and authorized by
+                  its ACLs.
+                nullable: true
+                properties:
+                  saslPlain:
+                    properties:
+                      adminUser:
+                        description: One superuser used to administer ACLs; credentials
+                          come from the same Secret.
+                        type: string
+                      credentialsSecretName:
+                        description: Secret in the FlussCluster namespace; key `credentials`
+                          holds the user:password map.
+                        type: string
+                    required:
+                    - adminUser
+                    - credentialsSecretName
+                    type: object
+                required:
+                - saslPlain
                 type: object
               tabletServers:
                 properties:
@@ -3684,6 +3774,11 @@ spec:
             - message: logReplicationFactor must not exceed tabletServers replicas
               rule: '!has(self.defaults) || self.defaults.logReplicationFactor <=
                 self.tabletServers.replicas'
+            - message: public native access cannot be removed from a running FlussCluster
+              rule: '!has(oldSelf.listeners) || !has(oldSelf.listeners.external) ||
+                (has(self.listeners) && has(self.listeners.external))'
+            - message: the HTTP Gateway cannot share the native per-user ACL listener
+              rule: '!has(self.security) || !has(self.gateway) || !self.gateway.enabled'
           status:
             nullable: true
             properties:
@@ -3701,7 +3796,8 @@ spec:
                     format: int32
                     type: integer
                   dataAtRisk:
-                    description: Present only when the server reports persistent recovery evidence.
+                    description: Present only when the server reports persistent recovery
+                      evidence.
                     nullable: true
                     type: boolean
                   inSyncReplicas:
@@ -3762,6 +3858,7 @@ spec:
                       - S3CredentialsStale
                       - OperationBlocked
                       - DataAtRisk
+                      - NativeRoutesProgrammed
                       type: string
                   required:
                   - lastTransitionTime
@@ -3790,6 +3887,31 @@ spec:
               coordinatorEndpoints:
                 items:
                   type: string
+                type: array
+              externalEndpoints:
+                description: 'Configured mappings whose Services converged in this
+                  reconciliation.
+
+                  External routes and network reachability are managed and verified
+                  separately.'
+                items:
+                  description: Configured external mapping with a reconciled Service,
+                    not a reachability claim.
+                  properties:
+                    address:
+                      type: string
+                    pod:
+                      type: string
+                    role:
+                      type: string
+                    service:
+                      type: string
+                  required:
+                  - address
+                  - pod
+                  - role
+                  - service
+                  type: object
                 type: array
               gateway:
                 description: 'Gateway presence, or absent when not requested. Readiness

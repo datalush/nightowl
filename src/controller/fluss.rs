@@ -110,16 +110,18 @@ pub async fn probe(cluster: &FlussCluster, clock: &ProbeClock) -> Vec<Observatio
     }
 }
 
-/// Coordinator ordinal zero over the internal listener: the stable address
-/// of whoever owns cluster health. Shared with the dynamic-config step,
-/// which speaks to the same Admin endpoint.
+/// All coordinator ordinals over INTERNAL. A standby may refuse metadata;
+/// fluss-rs tries the next bootstrap rather than depending on ordinal zero.
 pub(crate) fn bootstrap_address(cluster: &FlussCluster) -> Option<String> {
     let name = cluster.metadata.name.clone()?;
     let namespace = cluster.metadata.namespace.clone()?;
-    let port = cluster.spec.listeners.as_ref()?.internal.port;
-    Some(format!(
-        "{name}-coordinator-0.{name}{COORDINATOR_HEADLESS_SUFFIX}.{namespace}.svc.cluster.local:{port}",
-    ))
+    let port = cluster.spec.resolved_listeners().internal.port;
+    Some((0..cluster.spec.coordinator.replicas)
+        .map(|ordinal| format!(
+            "{name}-coordinator-{ordinal}.{name}{COORDINATOR_HEADLESS_SUFFIX}.{namespace}.svc.cluster.local:{port}"
+        ))
+        .collect::<Vec<_>>()
+        .join(","))
 }
 
 async fn round_trip(bootstrap: &str) -> Result<HealthSnapshot, fluss::error::Error> {
@@ -265,7 +267,7 @@ pub fn tablet_entries(uids: &[String], health: &[TabletHealth]) -> Vec<TabletSer
 
 #[cfg(test)]
 mod tests {
-    use super::{snapshot, tablet_entries};
+    use super::{bootstrap_address, snapshot, tablet_entries};
     use crate::api::ClusterHealthState;
     use fluss::metadata::{
         ClusterHealth as FlussHealthData, ClusterHealthStatus as FlussHealthState,
@@ -286,6 +288,15 @@ mod tests {
 
     fn node(id: i32, server_type: ServerType) -> ServerNode {
         ServerNode::new(id, format!("host-{id}"), 9123 + id as u32, server_type)
+    }
+
+    #[test]
+    fn administrative_bootstrap_survives_coordinator_zero_loss() {
+        let mut cluster = crate::resources::external_access::tests::cluster();
+        cluster.spec.coordinator.replicas = 2;
+        assert_eq!(bootstrap_address(&cluster), Some(
+            "spike-coordinator-0.spike-coordinator-headless.operator-dev.svc.cluster.local:9123,spike-coordinator-1.spike-coordinator-headless.operator-dev.svc.cluster.local:9123".into()
+        ));
     }
 
     fn per_server(

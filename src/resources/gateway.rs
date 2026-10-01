@@ -113,13 +113,7 @@ fn bootstrap_servers(cluster: &FlussCluster) -> String {
         .namespace
         .clone()
         .expect("FlussCluster needs a namespace");
-    let port = cluster
-        .spec
-        .listeners
-        .as_ref()
-        .expect("listeners is required for the gateway bootstrap")
-        .internal
-        .port;
+    let port = cluster.spec.resolved_listeners().internal.port;
     format!("{name}-coordinator-0.{name}-coordinator-headless.{namespace}.svc.cluster.local:{port}")
 }
 

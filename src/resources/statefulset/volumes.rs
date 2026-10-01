@@ -20,6 +20,8 @@ use super::{Build, Role, STAGING_DIR};
 use crate::api::{S3AuthenticationSpec, StorageSpec};
 use crate::constants::{S3_ACCESS_KEY_FILE, S3_SECRET_KEY_FILE, S3_SECRETS_DIR};
 use crate::resources::server_config;
+use crate::resources::server_config::security;
+use crate::resources::tls_proxy;
 
 /// Volume holding the staged `server.yaml`.
 const CONFIG_VOLUME: &str = "server-config";
@@ -27,6 +29,7 @@ const CONFIG_VOLUME: &str = "server-config";
 /// Volume holding the mounted S3 Secret for secret auth. Absent under
 /// workload identity, where the credential chain needs no files.
 const S3_CREDENTIALS_VOLUME: &str = "s3-credentials";
+const SASL_CREDENTIALS_VOLUME: &str = "sasl-credentials";
 
 /// Data volume name, owned by the claim template when one exists.
 const DATA_VOLUME: &str = "data";
@@ -41,6 +44,57 @@ impl<'a> Build<'a> {
             }),
             ..Default::default()
         }];
+        if let Some(external) = self
+            .cluster
+            .spec
+            .listeners
+            .as_ref()
+            .and_then(|l| l.external.as_ref())
+        {
+            volumes.push(Volume {
+                name: tls_proxy::CONFIG_VOLUME.into(),
+                config_map: Some(ConfigMapVolumeSource {
+                    name: format!("{}-native-tls", self.cluster_name),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+            volumes.push(Volume {
+                name: tls_proxy::CERT_VOLUME.into(),
+                secret: Some(SecretVolumeSource {
+                    secret_name: Some(external.tls.secret_name.clone()),
+                    items: Some(vec![
+                        KeyToPath {
+                            key: "tls.crt".into(),
+                            path: "tls.crt".into(),
+                            ..Default::default()
+                        },
+                        KeyToPath {
+                            key: "tls.key".into(),
+                            path: "tls.key".into(),
+                            ..Default::default()
+                        },
+                    ]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        }
+        if let Some(native) = &self.cluster.spec.security {
+            volumes.push(Volume {
+                name: SASL_CREDENTIALS_VOLUME.into(),
+                secret: Some(SecretVolumeSource {
+                    secret_name: Some(native.sasl_plain.credentials_secret_name.clone()),
+                    items: Some(vec![KeyToPath {
+                        key: security::CREDENTIALS_FILE.into(),
+                        path: security::CREDENTIALS_FILE.into(),
+                        ..Default::default()
+                    }]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            });
+        }
         if let S3AuthenticationSpec::Secret { secret_ref } =
             &self.cluster.spec.remote_storage.s3.authentication
         {
@@ -135,6 +189,14 @@ impl<'a> Build<'a> {
             mounts.push(VolumeMount {
                 name: S3_CREDENTIALS_VOLUME.to_string(),
                 mount_path: S3_SECRETS_DIR.to_string(),
+                read_only: Some(true),
+                ..Default::default()
+            });
+        }
+        if self.cluster.spec.security.is_some() {
+            mounts.push(VolumeMount {
+                name: SASL_CREDENTIALS_VOLUME.into(),
+                mount_path: security::CREDENTIALS_DIR.into(),
                 read_only: Some(true),
                 ..Default::default()
             });

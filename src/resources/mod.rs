@@ -2,9 +2,14 @@
 pub mod client_service;
 pub mod config_map;
 pub mod coordinator_service;
+pub mod dns_mapping;
+pub mod external_access;
 pub mod gateway;
+pub mod network_policy;
 pub mod pod_disruption_budget;
 pub mod server_config;
 pub mod service;
 pub mod statefulset;
 pub mod tablet_headless_service;
+pub mod tls_proxy;
+pub mod tls_routes;

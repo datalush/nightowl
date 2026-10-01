@@ -77,6 +77,122 @@ El clúster aislado `rst-rf2` usó la imagen `.5`, el prefijo S3 exclusivo `clus
 
 Se reemplazaron solo el disco y pod del follower: el PVC `95695e67-ee41-4519-abef-15c4dce13d59` pasó a `d9a3ca49-3a44-42c9-878d-7747fbac1c95`, y volvió a ISR 2/2. Tras borrar el **pod** del líder 0 (sin borrar su PVC), el tabletserver 1 asumió el liderazgo en epoch 1. Descargó el snapshot 0 de S3, recuperó KV desde offset 50 y sirvió las 50 claves y valores exactos. Las primeras diez peticiones al Gateway tras el failover devolvieron errores; tras reintentarlas, se escribieron diez claves nuevas y se comprobaron **60/60** valores exactos. El nuevo líder completó el snapshot 1 (`row_count=60`, `log_offset=80`, checkpoint de escritores presente); el offset cuenta actividad WAL, no claves KV distintas. Estado final observado: GREEN, ISR 2/2, `data_at_risk=false`, Night Owl `DataAtRisk=False`. Esto verifica reemplazo y promoción del follower, no la pérdida simultánea de ambas réplicas.
 
+## Listener externo nativo con Envoy, 2026-09-29
+
+Verificado en un k3d separado, `native-access` (un server y dos agents), sin cambiar
+el lab de referencia. Envoy Gateway Helm **1.5.0**, `Gateway/v1`,
+`TCPRoute/v1alpha2`, imagen Fluss **1.0.0-midnattsol.5** y SDK nativo fijado en
+**d2a1f438**. La imagen es anterior al trabajo abandonado de JWT/OAUTHBEARER; no
+hicieron falta cambios en el core de Fluss para este acceso externo.
+
+El clúster `native-test/externaltest` tenía dos coordinadores, inicialmente dos
+tablets, RF=2 y dos buckets por tabla. ZooKeeper 3.9.3 y RustFS 1.0.0 efímero eran
+dependencias del lab. k3s ServiceLB expuso Envoy por la IP del nodo Docker
+`172.18.0.2`: coordinadores 23000/23001, tablets 24000/24001 y posteriormente 24002.
+No se añadieron rutas al CIDR de pods ni entradas en `/etc/hosts`.
+
+El test desde el host del anterior drill por puertos (sustituido por el diseño SNI):
+
+- Descubrió las direcciones externas del coordinador y los tablets.
+- Creó `operator_external.phase1`, escribió 20 filas KV y comprobó sus 20 valores
+  exactos a través de Envoy.
+- Reemplazó el pod tablet-0 conservando su PVC y volvió a leer 20/20 valores sin
+  reescribirlos. El UID cambió de `0438662e-fd6a-41e4-9be0-58e73a66846f` a
+  `4d3dff83-d970-49b1-b03a-3cfc5547e94f`.
+- Borró el coordinador activo 0. Un cliente nuevo arrancado inmediatamente con
+  ambos bootstrap descubrió al coordinador 1 en 23001 y leyó 20/20 valores. Esto
+  verifica redescubrimiento del líder, no continuidad de peticiones en una conexión
+  ya abierta.
+- Escaló de dos a tres tablets y regeneró/aplicó las rutas GitOps. Los metadatos
+  incluyeron tablet-2 en 24002; endpoints anteriores e identidades de pods existentes
+  permanecieron estables y los 20 valores seguían siendo legibles.
+
+Estado final: GREEN, 4/4 réplicas sincronizadas, 2/2 líderes activos,
+`dataAtRisk=false` y cinco mapeos externos en status. Las consultas Admin internas
+del operador continuaron funcionando. Esta fase no ejercitó SASL/ACL ni lecturas
+cliente de ficheros remotos.
+
+Pruebas adicionales: usar por separado el coordinador activo y cada una de las
+tres rutas de tablets como bootstrap permitió leer 20/20 valores. El standby
+como único bootstrap devolvió `NotLeader` (código 65); la lista completa de
+coordinadores funcionó. Por eso se publican todos los coordinadores, sin depender
+de un Service que los balancee aleatoriamente.
+
+Hallazgos de preparación: Envoy reserva 19000/19001 internamente, aunque una ruta
+en esos puertos aparezca aceptada. El almacenamiento externo del lab anterior no
+era accesible desde la red aislada; las pruebas de datos exitosas utilizaron un
+clúster nuevo con RustFS local. Reproducción en
+[acceso nativo externo](native-external-access.md).
+
+## Métricas del lab (Prometheus)
+
+### Acceso nativo TLS/SNI con una sola IP, 2026-10-01
+
+Clúster k3d aislado `native-sni` (un server y dos agents, sin tocar el lab de
+referencia): Envoy Gateway Helm 1.9.1 con `TLSRoute/v1`, sidecars Envoy 1.33.4,
+imagen Fluss `1.0.0-midnattsol.5` y clientes TLS Java/Rust de `feat/clients`.
+El DNS `fluss.172.19.0.2.sslip.io` y subdominios `coordinator-N`/`tablet-N`
+resolvieron a la misma IP del nodo Docker, puerto 443.
+
+Se generó un certificado de servidor firmado por CA con dominio base y
+wildcard. Rust rechazó el primer intento de usar directamente como servidor
+un certificado CA autofirmado (`CaUsedAsEndEntity`), confirmando la
+validación. Con la cadena corregida, Rust escribió y leyó **20/20** valores
+exactos por Envoy passthrough y sidecars; Java leyó **los mismos 20/20**
+mediante el cliente incluido en Flink 1.20. Tras borrar Gateway/TLSRoutes
+aplicados manualmente, el operador los recreó con owner references y ambos
+clientes siguieron leyendo 20/20.
+
+La rotación del Secret a un nuevo certificado firmado por la misma CA cambió
+su número de serie sin cambiar el UID del pod tablet (SDS). Con
+`internalMapping: true`, el operador creó cinco reglas CoreDNS. Una copia
+del fragmento a `coredns-custom` efectuada por la plataforma y un rollout
+inicial de CoreDNS hicieron que el dominio base resolviera al ClusterIP de
+bootstrap y `tablet-0` a su ClusterIP propio. El operador no hace esa copia.
+
+Tras configurar `security.saslPlain` desde un Secret efímero y habilitar las
+ACL nativas, el operador reinició los servidores ordenadamente. Hubo que
+dirigir el probe de tablets a INTERNAL: CLIENT ya exigía SASL y el probe no
+tenía credenciales. También hubo que registrar el ordinal tras borrarlo en
+el secuenciador por claves: antes volvía a borrar el mismo tablet tras Ready.
+Ambos defectos quedaron corregidos y probados.
+
+El admin concedió a Alice READ/DESCRIBE sobre `native_sni.phase1` mediante
+el cliente nativo Java. **Alice leyó 20/20** valores con Java y Rust por
+TLS/SNI + SASL. Bob se autenticó pero recibió una
+**`AuthorizationException` al administrar ACLs**, sin poder leer la tabla.
+Con el clúster reiniciado, el Admin interno del operador seguía observando
+GREEN tras recibir `NotLeader` del coordinador 0 y probar el 1.
+
+Después se reemplazó tablet-0 conservando PVC: cambió el UID y Alice leyó
+los 20 valores originales. Se borró el coordinador activo 1: el siguiente
+bootstrap descubrió al 0 y volvió a leer 20/20. Al escalar de dos a tres
+tablets, el operador creó automáticamente el Service y TLSRoute nuevos; el
+cliente descubrió `tablet-2` en la misma IP:443 y leyó 20/20. La plataforma
+actualizó el fragmento DNS opcional y reinició CoreDNS: `tablet-2` resolvió
+internamente a su propio ClusterIP (`10.43.190.181`), no a la IP de Envoy.
+**El operador no ejecuta ese paso de plataforma.** Dos Jobs cliente Java con
+el bundle Flink 1.20 leyeron también 20/20 desde Kubernetes: primero por
+la IP pública de Envoy y luego con DNS dividido desde dos nodos k3d. El
+dominio base resolvió a `native-bootstrap` (`10.43.10.241`) y `tablet-0` a
+su ClusterIP (`10.43.6.221`). Son clientes equivalentes a workers, no jobs
+Flink. El 2026-10-01 se ejecutó además un clúster Flink 1.20 real: un
+JobManager y dos TaskManagers en nodos k3d distintos. Un job SQL batch con el
+conector Fluss 1.20 y el **único bootstrap público TLS/SNI** consultó
+`SELECT COUNT(*) FROM native_sni.phase1` con SASL y devolvió **20**;
+Flink registró el job como `FINISHED` con ambas tareas terminadas. Se ha
+verificado la lectura distribuida con Flink, **no** la recuperación de
+checkpoints, el failover de Flink, Spark, el acceso desde fuera al almacén de
+objetos ni la lectura directa de snapshots remotos por un cliente. El
+despliegue Flink y sus credenciales permanecieron fuera de Git. Ver
+[acceso nativo externo](native-external-access.md).
+
+Finalmente se redujo de tres tablets a dos solo cuando una lectura Admin
+fresca confirmó que tablet-2 estaba registrado y alojaba **cero** réplicas.
+El StatefulSet retiró ese pod y el operador eliminó únicamente su TLSRoute
+y Service propios. Alice volvió a leer 20/20 valores por el bootstrap base;
+el PVC del tablet retirado se conservó.
+
 ## Métricas del lab (Prometheus)
 
 Un Prometheus mínimo (`prom/prometheus:v3.5.0`, Deployment + Service en el namespace `monitoring`, manifiestos fuera de este repo) scrapea los pods Fluss por discovery filtrado con las anotaciones `prometheus.io/scrape=true` y `prometheus.io/port=9249`. El reporter se activa por clúster con la API existente —sin cambios en el operador:

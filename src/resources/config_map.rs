@@ -133,8 +133,10 @@ pub fn desired_tablet_config(
 pub(crate) fn coordinator_properties(
     cluster: &FlussCluster,
 ) -> Result<BTreeMap<String, String>, server_config::ConfigError> {
+    super::external_access::validate(cluster)?;
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
+    properties.extend(server_config::security::properties(cluster)?);
     properties.extend(server_config::storage::properties(cluster));
     properties.extend(server_config::table_defaults::properties(cluster));
     properties.extend(server_config::metrics::base_properties(cluster));
@@ -166,8 +168,10 @@ pub(crate) fn coordinator_server_yaml(
 pub(crate) fn tablet_properties(
     cluster: &FlussCluster,
 ) -> Result<BTreeMap<String, String>, server_config::ConfigError> {
+    super::external_access::validate(cluster)?;
     let mut properties = server_config::zookeeper::properties(cluster);
     properties.extend(server_config::listeners::properties(cluster));
+    properties.extend(server_config::security::properties(cluster)?);
     properties.extend(server_config::storage::properties(cluster));
     properties.extend(server_config::table_defaults::properties(cluster));
     properties.extend(server_config::metrics::base_properties(cluster));

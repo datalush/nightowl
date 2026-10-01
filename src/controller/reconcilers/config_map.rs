@@ -31,11 +31,36 @@ pub async fn reconcile(
     observations.push(coord_obs);
     observations.push(tablet_obs);
     if let (Some(coordinator_yaml), Some(tablet_yaml)) = (coord_yaml, tablet_yaml) {
+        let coordinator_yaml =
+            crate::resources::external_access::rollout_input(cluster, true, coordinator_yaml);
+        let tablet_yaml =
+            crate::resources::external_access::rollout_input(cluster, false, tablet_yaml);
         observations.push(Observation::ConfigHash {
             value: hash::combined_config_hash(&coordinator_yaml, &tablet_yaml),
         });
     }
     Ok(observations)
+}
+
+/// The sidecar's static Envoy configuration is distinct from server.yaml.
+pub async fn reconcile_tls(
+    api: &Api<ConfigMap>,
+    cluster: &FlussCluster,
+    uid: &str,
+) -> Result<Vec<Observation>, Error> {
+    let Some(desired) = crate::resources::tls_proxy::desired_config_map(cluster) else {
+        return Ok(vec![]);
+    };
+    let name = desired.metadata.name.clone().ok_or(Error::MissingName)?;
+    let observation = match apply::apply(api, desired, uid, |a, b| a.data == b.data).await {
+        Ok(outcome) => Observation::ConfigMapConverged { name, outcome },
+        Err(Error::NotOwned(name)) => Observation::ConfigMapBlocked {
+            message: format!("configmap {name} exists with a different owner"),
+            name,
+        },
+        Err(error) => return Err(error),
+    };
+    Ok(vec![observation])
 }
 
 #[derive(Clone, Copy)]

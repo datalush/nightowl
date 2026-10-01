@@ -55,17 +55,18 @@ Per-pod `assignedTablets` and `replicaHealth` populate when the server answers `
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `observedGeneration` | integer, optional | The last CR generation whose desired state has actually been handled. |
-| `observedConfigHash` | string, optional | Combined `sha256:<hex>` over the rendered coordinator and tablet `server.yaml` documents (coordinator first); each ConfigMap also carries its own hash annotation for future rollout triggers. |
+| `observedConfigHash` | string, optional | Combined hash of the rendered coordinator/tablet settings, including the generated external identity when present. |
 | `observedVersion` | string, optional | Version confirmed by observation, not simply requested. |
 | `appliedDynamicConfig` | map, optional | Applied dynamic keys to value-hashes (hashes only, never values); records what Admin already holds. |
 | `clusterHealth` | optional object | `GREEN`, `YELLOW`, `RED`, or `UNKNOWN`, plus global replica/ISR/leader counts. |
-| `coordinatorEndpoints` | list of strings | Endpoints clients can use to discover the Coordinator. |
+| `coordinatorEndpoints` | list of strings | Observed internal coordinator endpoints; external clients use the public bootstrap. |
+| `externalEndpoints` | list of objects | Public addresses with converged, owned Services; not a reachability check. |
 | `coordinator` | optional object | Desired/ready replicas and optional `activePod`. |
 | `tabletServers` | optional object | Desired/ready replicas and optional per-pod `assignedTablets`/`replicaHealth`. |
 | `gateway` | optional object | Desired/ready Gateway replicas plus the in-cluster URL; absent unless requested. |
 | `conditions` | list | Independent operational statements with evidence and transition time. |
 
-Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`; `type` is also an enum: `Ready`, `Progressing`, `Upgrading`, `Stalled`, `Degraded`, `Adoptable`, `KubernetesResourcesReady`, `ZooKeeperReachable`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, or `OperationBlocked`. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, `Stalled` (sequenced-restart stalls), `DataAtRisk` (RED health with hosted replicas but zero active leaders: no live copy of some data — observe-and-report only, no retries, no byte-moving; Fluss 1.0 offers no restore primitive) and `OperationBlocked` (dynamic-config rejections) run today; the rest are planned.
+Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`. `NativeRoutesProgrammed=True` means the Gateway reports Programmed and every TLSRoute has fresh Accepted/ResolvedRefs conditions, **not** that DNS, TLS or a remote client has succeeded. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, `Stalled` (sequenced-restart stalls), `DataAtRisk` (RED health with hosted replicas but zero active leaders: observe-and-report only) and `OperationBlocked` (dynamic-config rejections) also run today. Other enum values remain reserved for later work.
 
 Fluss 1.0's `getClusterHealth()` supports global counters. The per-pod `assignedTablets` and `replicaHealth` fields require the per-server Admin read API: absent upstream in 1.0, provided by the fork image and observed into status when the server answers; they must remain absent while unavailable, not be invented from Pod readiness.
 

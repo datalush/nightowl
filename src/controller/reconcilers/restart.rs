@@ -424,6 +424,10 @@ pub async fn reconcile(
             pods.delete(&name, &DeleteParams::default())
                 .await
                 .map_err(Error::Kube)?;
+            // A keys-only run must not delete this ordinal again once its replacement
+            // becomes Ready. `plan_role` still waits for its readiness first.
+            seq.done_tablet_ordinals.push(ordinal);
+            seq.done_tablet_ordinals.sort_unstable();
             return Ok(vec![Observation::RestartSeqUpdate { seq: Some(seq) }]);
         }
         Action::Wait => {
@@ -474,6 +478,8 @@ pub async fn reconcile(
             pods.delete(&name, &DeleteParams::default())
                 .await
                 .map_err(Error::Kube)?;
+            seq.done_coordinator_ordinals.push(ordinal);
+            seq.done_coordinator_ordinals.sort_unstable();
             return Ok(vec![Observation::RestartSeqUpdate { seq: Some(seq) }]);
         }
         Action::Wait => {

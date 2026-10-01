@@ -10,4 +10,6 @@
 pub mod ownership;
 pub mod replication;
 pub mod resources;
+pub mod security;
 pub mod storage;
+pub mod tls;

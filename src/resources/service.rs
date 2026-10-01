@@ -39,7 +39,14 @@ fn same_ports(a: Option<&[ServicePort]>, b: Option<&[ServicePort]>) -> bool {
             .map(|port| (port.name.clone(), port.port, port.protocol.clone()))
             .collect()
     }
-    key(a.unwrap_or_default()) == key(b.unwrap_or_default())
+    let desired = a.unwrap_or_default();
+    let live = b.unwrap_or_default();
+    key(desired) == key(live)
+        && desired.iter().zip(live).all(|(a, b)| {
+            a.target_port
+                .as_ref()
+                .is_none_or(|target| b.target_port.as_ref() == Some(target))
+        })
 }
 
 #[cfg(test)]
@@ -101,6 +108,13 @@ mod tests {
         assert!(
             !same_client_service(&desired, &live),
             "dropped ports must read as drift"
+        );
+        let mut redirected = desired.clone();
+        redirected.spec.as_mut().unwrap().ports.as_mut().unwrap()[0].target_port =
+            Some(IntOrString::Int(8443));
+        assert!(
+            !same_client_service(&redirected, &desired),
+            "TLS sidecar target must converge"
         );
     }
 }

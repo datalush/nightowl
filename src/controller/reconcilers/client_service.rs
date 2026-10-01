@@ -31,3 +31,31 @@ pub async fn reconcile(
         Err(e) => Err(e),
     }
 }
+
+/// Reconcile proxy backends without adopting foreign Services or deleting retired ones.
+pub async fn reconcile_external(
+    api: &Api<Service>,
+    cluster: &crate::api::FlussCluster,
+    uid: &str,
+) -> Result<Vec<Observation>, Error> {
+    let desired = match crate::resources::external_access::services(cluster) {
+        Ok(services) => services,
+        // The config-map step reports invalid configuration and blocks workloads.
+        Err(_) => return Ok(vec![]),
+    };
+    let mut observations = Vec::new();
+    for service in desired {
+        let name = service.meta().name.clone().ok_or(Error::MissingName)?;
+        observations.push(
+            match apply::apply(api, service, uid, service::same_client_service).await {
+                Ok(outcome) => Observation::ServiceConverged { name, outcome },
+                Err(Error::NotOwned(name)) => Observation::ServiceBlocked {
+                    message: Error::NotOwned(name.clone()).to_string(),
+                    name,
+                },
+                Err(error) => return Err(error),
+            },
+        );
+    }
+    Ok(observations)
+}

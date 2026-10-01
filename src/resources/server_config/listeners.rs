@@ -14,14 +14,7 @@ use crate::api::FlussCluster;
 pub(crate) const PROTECTED_KEYS: &[&str] = &["internal.listener.name"];
 
 pub(crate) fn properties(cluster: &FlussCluster) -> BTreeMap<String, String> {
-    let name = cluster
-        .spec
-        .listeners
-        .as_ref()
-        .expect("listeners is required for the server config")
-        .internal
-        .name
-        .clone();
+    let name = cluster.spec.resolved_listeners().internal.name.clone();
 
     BTreeMap::from([("internal.listener.name".to_string(), name)])
 }

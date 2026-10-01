@@ -41,11 +41,7 @@ pub fn desired_service(cluster: &FlussCluster) -> Service {
         block_owner_deletion: Some(true),
     };
 
-    let listeners = cluster
-        .spec
-        .listeners
-        .as_ref()
-        .expect("listeners is required for the client service");
+    let listeners = cluster.spec.resolved_listeners();
     // Absent when the CR sets none: an empty map would read as drift
     // against the server's null on every trigger.
     let annotations = if listeners.client.annotations.is_empty() {

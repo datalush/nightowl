@@ -14,6 +14,7 @@
 
 mod container;
 mod pod;
+mod tls;
 mod volumes;
 use std::collections::BTreeMap;
 
@@ -140,7 +141,13 @@ pub(crate) fn static_config_hash(
     };
     let appliable = dynamic::appliable(&properties, &other);
     let server_yaml = render::to_yaml(&dynamic::without_appliable(&properties, &appliable));
-    Ok(hash::sha256_hex(&server_yaml))
+    // External identity is appended at boot, outside server.yaml. Include it
+    // in rollout identity; replica changes deliberately do not change this hash.
+    Ok(hash::sha256_hex(&super::external_access::rollout_input(
+        cluster,
+        coordinator,
+        server_yaml,
+    )))
 }
 
 impl<'a> Build<'a> {

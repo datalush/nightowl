@@ -47,7 +47,7 @@ impl<'a> Build<'a> {
 
     fn ports(&self) -> Vec<ContainerPort> {
         let listeners = self.listeners();
-        vec![
+        let mut ports = vec![
             ContainerPort {
                 name: Some(PORT_NAME_INTERNAL.to_string()),
                 container_port: listeners.internal.port,
@@ -60,7 +60,16 @@ impl<'a> Build<'a> {
                 protocol: Some("TCP".to_string()),
                 ..Default::default()
             },
-        ]
+        ];
+        if let Some(external) = &listeners.external {
+            ports.push(ContainerPort {
+                name: Some("external".into()),
+                container_port: external.port,
+                protocol: Some("TCP".into()),
+                ..Default::default()
+            });
+        }
+        ports
     }
 
     /// Resource requirements straight from the component spec.
@@ -111,17 +120,32 @@ impl<'a> Build<'a> {
             "$POD_NAME.{}.{}",
             self.service_name, "$POD_NAMESPACE.svc.cluster.local"
         );
-        let bind = format!(
+        let mut bind = format!(
             "{}://$POD_IP:{}, {}://$POD_IP:{}",
             listeners.internal.name,
             listeners.internal.port,
             listeners.client.name,
             listeners.client.port,
         );
-        let advertised = format!(
+        let mut advertised = format!(
             "{}://{}:{}",
             listeners.client.name, dns, listeners.client.port
         );
+        if let Some(external) = &listeners.external {
+            // Only the local TLS sidecar can reach the plaintext EXTERNAL listener.
+            bind.push_str(&format!(
+                ", {}://127.0.0.1:{}",
+                external.name, external.port
+            ));
+            let role = match self.role {
+                Role::Coordinator => "coordinator",
+                Role::Tablet => "tablet",
+            };
+            advertised.push_str(&format!(
+                ", {}",
+                crate::resources::external_access::advertised(external, role)
+            ));
+        }
         let id_line = match self.role {
             Role::Coordinator => String::new(),
             Role::Tablet => {
@@ -144,9 +168,14 @@ impl<'a> Build<'a> {
             field_ref_env("POD_IP", "status.podIP"),
         ];
         if self.role == Role::Tablet {
+            let readiness_port = if self.cluster.spec.security.is_some() {
+                self.listeners().internal.port
+            } else {
+                self.listeners().client.port
+            };
             env.push(EnvVar {
                 name: "READINESS_TCP_PORT".to_string(),
-                value: Some(self.listeners().client.port.to_string()),
+                value: Some(readiness_port.to_string()),
                 ..Default::default()
             });
         }

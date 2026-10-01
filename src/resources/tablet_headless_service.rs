@@ -52,13 +52,7 @@ pub fn desired_service(cluster: &FlussCluster) -> Service {
         ..Default::default()
     };
 
-    let port = cluster
-        .spec
-        .listeners
-        .as_ref()
-        .expect("listeners is required for the tablet headless service")
-        .internal
-        .port;
+    let port = cluster.spec.resolved_listeners().internal.port;
 
     let svc_spec = ServiceSpec {
         cluster_ip: Some("None".to_string()),

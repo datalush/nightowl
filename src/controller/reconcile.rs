@@ -42,13 +42,21 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     let clusters: Api<FlussCluster> = Api::namespaced(ctx.client.clone(), &namespace);
     let deployments: Api<Deployment> = Api::namespaced(ctx.client.clone(), &namespace);
     let ingresses: Api<Ingress> = Api::namespaced(ctx.client.clone(), &namespace);
+    let network_policies: Api<k8s_openapi::api::networking::v1::NetworkPolicy> =
+        Api::namespaced(ctx.client.clone(), &namespace);
 
     let mut observations = Vec::new();
     observations
         .push(reconcilers::coordinator_service::reconcile(&services, &cluster, &uid).await?);
     observations.push(reconcilers::tablet_service::reconcile(&services, &cluster, &uid).await?);
     observations.push(reconcilers::client_service::reconcile(&services, &cluster, &uid).await?);
+    observations
+        .extend(reconcilers::network_policy::reconcile(&network_policies, &cluster, &uid).await?);
+    observations
+        .extend(reconcilers::client_service::reconcile_external(&services, &cluster, &uid).await?);
     observations.extend(reconcilers::config_map::reconcile(&configmaps, &cluster, &uid).await?);
+    observations.extend(reconcilers::config_map::reconcile_tls(&configmaps, &cluster, &uid).await?);
+    observations.push(reconcilers::dns_mapping::reconcile(&configmaps, &cluster, &uid).await?);
     // Guardrails gate the workloads: a blocked topology, oversized heap or
     // missing storage dependency refuses pods instead of merely reporting
     // them afterwards. Services and ConfigMaps still converge first — they
@@ -58,6 +66,8 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     }
     observations.extend(guardrails::resources::check(&cluster));
     observations.extend(guardrails::storage::check(&ctx.client, &namespace, &cluster).await?);
+    observations.extend(guardrails::tls::check(&ctx.client, &namespace, &cluster).await?);
+    observations.extend(guardrails::security::check(&ctx.client, &namespace, &cluster).await?);
     let workloads_blocked = observations.iter().any(|o| o.blocked_guardrail().is_some());
     if !workloads_blocked {
         observations.extend(
@@ -88,6 +98,8 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
         )
         .await?,
     );
+    observations
+        .extend(reconcilers::tls_routes::reconcile(&ctx.client, &namespace, &cluster, &uid).await?);
     // Observe-only, always best-effort: health never gates, never errors,
     // and rate-limits itself. Runs even when workloads are blocked — old
     // pods from a previous good state may still answer.
@@ -101,6 +113,9 @@ pub async fn reconcile(cluster: Arc<FlussCluster>, ctx: Arc<Context>) -> Result<
     // reads no standing decisions, only live pods plus standing lists.
     let pods: Api<Pod> = Api::namespaced(ctx.client.clone(), &namespace);
     observations.extend(reconcilers::restart::reconcile(&pods, &cluster, &observations).await?);
+    observations.extend(
+        reconcilers::retired_endpoints::reconcile(&ctx.client, &namespace, &cluster, &uid).await?,
+    );
 
     if reconcilers::status::reconcile(&clusters, &cluster, &observations).await? {
         tracing::info!(cluster = %name, "updated FlussCluster status");

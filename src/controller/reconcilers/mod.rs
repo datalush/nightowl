@@ -9,13 +9,17 @@
 pub mod client_service;
 pub mod config_map;
 pub mod coordinator_service;
+pub mod dns_mapping;
 pub mod dynamic_config;
 pub mod gateway;
+pub mod network_policy;
 pub mod pod_disruption_budget;
 pub mod restart;
+pub mod retired_endpoints;
 pub mod statefulset;
 pub mod status;
 pub mod tablet_service;
+pub mod tls_routes;
 pub mod volume;
 
 use super::apply::ApplyOutcome;
@@ -163,6 +167,11 @@ pub enum Observation {
     /// Gateway absent: disabled or never requested; previously managed
     /// objects garbage-collected (or already gone).
     GatewayAbsent,
+    NativeRoutes {
+        accepted: usize,
+        desired: usize,
+        gateway_programmed: bool,
+    },
 }
 
 impl Observation {

@@ -9,6 +9,7 @@ pub mod jvm;
 pub mod listeners;
 pub mod metrics;
 pub mod overrides;
+pub mod security;
 pub mod storage;
 pub mod table_defaults;
 pub mod zookeeper;

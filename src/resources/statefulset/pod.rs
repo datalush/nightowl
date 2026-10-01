@@ -58,7 +58,7 @@ impl<'a> Build<'a> {
                 ..Default::default()
             }),
             spec: Some(PodSpec {
-                containers: vec![self.container()],
+                containers: self.containers(),
                 volumes: Some(self.volumes()),
                 security_context: overlay.and_then(|t| t.security_context.clone()),
                 image_pull_secrets: {
@@ -204,10 +204,6 @@ impl<'a> Build<'a> {
     }
 
     pub(super) fn listeners(&self) -> &ListenersSpec {
-        self.cluster
-            .spec
-            .listeners
-            .as_ref()
-            .expect("listeners is required for the StatefulSet pods")
+        self.cluster.spec.resolved_listeners()
     }
 }

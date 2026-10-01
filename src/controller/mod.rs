@@ -108,6 +108,10 @@ pub async fn run(client: Client, namespace: Option<String>) {
     let configmaps: Api<ConfigMap> = scoped(client.clone(), &namespace);
     let statefulsets: Api<StatefulSet> = scoped(client.clone(), &namespace);
     let pdbs: Api<PodDisruptionBudget> = scoped(client.clone(), &namespace);
+    let network_policies: Api<k8s_openapi::api::networking::v1::NetworkPolicy> =
+        scoped(client.clone(), &namespace);
+    let gateways = scoped_gateway_resource(client.clone(), &namespace, "Gateway");
+    let tls_routes = scoped_gateway_resource(client.clone(), &namespace, "TLSRoute");
     let context = Arc::new(Context {
         client,
         probes: fluss::ProbeClock::default(),
@@ -118,6 +122,9 @@ pub async fn run(client: Client, namespace: Option<String>) {
         .owns(configmaps, watcher::Config::default())
         .owns(statefulsets, watcher::Config::default())
         .owns(pdbs, watcher::Config::default())
+        .owns(network_policies, watcher::Config::default())
+        .owns_with(gateways.0, gateways.1, watcher::Config::default())
+        .owns_with(tls_routes.0, tls_routes.1, watcher::Config::default())
         .run(reconcile, error_policy, context)
         .for_each(|result| async move {
             match result {
@@ -142,6 +149,23 @@ pub async fn run(client: Client, namespace: Option<String>) {
         .await;
 }
 
+fn scoped_gateway_resource(
+    client: Client,
+    namespace: &Option<String>,
+    kind: &str,
+) -> (Api<kube::api::DynamicObject>, kube::api::ApiResource) {
+    let resource = kube::api::ApiResource::from_gvk(&kube::api::GroupVersionKind::gvk(
+        "gateway.networking.k8s.io",
+        "v1",
+        kind,
+    ));
+    let api = match namespace {
+        Some(namespace) => Api::namespaced_with(client, namespace, &resource),
+        None => Api::all_with(client, &resource),
+    };
+    (api, resource)
+}
+
 #[cfg(test)]
 mod deploy_tests {
     use std::collections::BTreeSet;
@@ -156,7 +180,7 @@ mod deploy_tests {
             serde_yaml::from_str(include_str!("../../deploy/clusterrole.yaml"))
                 .expect("clusterrole must parse");
         let rules = role.rules.expect("clusterrole needs rules");
-        assert_eq!(rules.len(), 11, "one rule per row of the verb matrix");
+        assert_eq!(rules.len(), 14, "one rule per row of the verb matrix");
 
         let mut remaining: Vec<(Vec<String>, Vec<String>, Vec<String>)> = rules
             .iter()
@@ -206,6 +230,11 @@ mod deploy_tests {
                 ],
             ),
             (
+                vec!["networking.k8s.io"],
+                vec!["networkpolicies"],
+                vec!["create", "get", "list", "update", "watch"],
+            ),
+            (
                 vec!["policy"],
                 vec!["poddisruptionbudgets"],
                 vec![
@@ -224,6 +253,16 @@ mod deploy_tests {
                 vec!["get", "list"],
             ),
             (vec![""], vec!["secrets", "serviceaccounts"], vec!["get"]),
+            (
+                vec!["gateway.networking.k8s.io"],
+                vec!["gateways"],
+                vec!["create", "get", "list", "update", "watch"],
+            ),
+            (
+                vec!["gateway.networking.k8s.io"],
+                vec!["tlsroutes"],
+                vec!["create", "delete", "get", "list", "update", "watch"],
+            ),
         ] {
             let position = remaining.iter().position(|(g, r, v)| {
                 g == &groups.iter().map(|s| s.to_string()).collect::<Vec<_>>()

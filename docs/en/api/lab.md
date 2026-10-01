@@ -80,6 +80,127 @@ The separate `rst-rf2` cluster used image `.5`, a dedicated `clusters/operator-d
 
 Only the follower's disk and pod were replaced: PVC `95695e67-ee41-4519-abef-15c4dce13d59` became `d9a3ca49-3a44-42c9-878d-7747fbac1c95`, and the follower returned to ISR 2/2. Deleting leader 0's **pod** (not its PVC) then caused tabletserver 1 to become leader at epoch 1. It downloaded snapshot 0 from S3, recovered KV from offset 50, and served all 50 exact keys and values. The Gateway's first ten post-failover requests reported errors; after retrying, ten new keys were written and **60/60** exact values verified. The promoted leader completed snapshot 1 (`row_count=60`, `log_offset=80`, writer checkpoint present); offsets count WAL activity, not distinct KV keys. Final observed health: GREEN, ISR 2/2, `data_at_risk=false`, Night Owl `DataAtRisk=False`. This verifies follower replacement and promotion, not simultaneous loss of both replicas.
 
+## Native external listener via Envoy, 2026-09-29
+
+Verified in a separate k3d cluster `native-access` (one server, two agents), without
+changing the reference lab. Envoy Gateway Helm **1.5.0**, Gateway API `Gateway/v1`
+and `TCPRoute/v1alpha2`, Fluss image **1.0.0-midnattsol.5**, and the operator's
+existing native SDK revision **d2a1f438**. This image predates the abandoned custom
+JWT/OAUTHBEARER work; no Fluss core changes were needed for external routing.
+
+Cluster `native-test/externaltest` used two coordinators, initially two tablets,
+RF=2 and two table buckets. Separate ZooKeeper 3.9.3 and ephemeral RustFS 1.0.0
+provided lab dependencies. Envoy's LoadBalancer was exposed by k3s ServiceLB on
+the Docker node address `172.18.0.2`: coordinators 23000/23001 and tablets
+24000/24001, later 24002. No pod-CIDR routing or hosts-file changes were added.
+
+The host-side test used in the earlier per-port drill (superseded by the SNI design):
+
+- Discovered the externally advertised coordinator and both tablet addresses.
+- Created `operator_external.phase1`, wrote 20 KV rows, and verified all 20 exact
+  values through Envoy.
+- Replaced tablet-0's pod, retained its PVC, then read all 20 original values
+  without rewriting them. Pod UID changed from `0438662e-fd6a-41e4-9be0-58e73a66846f`
+  to `4d3dff83-d970-49b1-b03a-3cfc5547e94f`.
+- Deleted active coordinator-0. An immediately started fresh native client with
+  both bootstrap addresses discovered coordinator-1 at port 23001 and read 20/20
+  original values. This proves leader rediscovery, not uninterrupted requests on
+  an already-open connection.
+- Scaled tablets from two to three and regenerated/applied the GitOps routes.
+  Metadata included tablet-2 at 24002; the old endpoints and existing pod identities
+  remained stable, and 20/20 original values were still readable.
+
+Final observed health: GREEN, 4/4 replicas in sync, 2/2 leaders active,
+`dataAtRisk=false`; status contained five configured external mappings. Internal
+Admin health checks remained functional. ACL/SASL and remote-file client reads
+were not exercised in this phase.
+
+Additional discovery checks: bootstrapping separately through the active
+coordinator and each of the three tablet routes succeeded with 20/20 reads. The
+standby coordinator alone returned `NotLeader` (code 65); the full coordinator
+bootstrap list succeeded. The external configuration therefore publishes all
+coordinators rather than depending on a randomly balanced coordinator Service.
+
+Two setup findings: Envoy reserves 19000/19001 internally, so those ports cannot
+be used for these public listeners despite route acceptance. The existing external
+lab object store was unreachable from the isolated network; a fresh cluster with
+local RustFS was used for the successful data tests. See
+[native external access](native-external-access.md) for reproduction.
+
+## Lab metrics (Prometheus)
+
+### Single-IP TLS/SNI native access, 2026-10-01
+
+Isolated k3d `native-sni` (one server, two agents; the reference lab remained
+untouched): Envoy Gateway Helm 1.9.1 with `TLSRoute/v1`, Envoy sidecars 1.33.4,
+Fluss image `1.0.0-midnattsol.5` and Rust/Java TLS clients from `feat/clients`.
+The external DNS `fluss.172.19.0.2.sslip.io` and generated `coordinator-N`/
+`tablet-N` subdomains all resolved to the same Docker node IP, port 443.
+
+A CA-signed end-entity certificate covered the base and wildcard domains.
+The first self-signed CA mistakenly used as a server certificate was rejected
+by the Rust client (`CaUsedAsEndEntity`), confirming certificate validation.
+After correcting the chain, both clients established TLS/SNI via an Envoy
+passthrough Gateway and per-pod sidecars: Rust wrote and looked up **20/20**
+exact values; Java looked up those **same 20/20** values using the bundled
+Flink 1.20 client. Deleting the manually applied TLSRoutes/Gateway caused
+the operator to recreate them with owner references; both clients still
+looked up 20/20 values.
+
+Updating the Secret with a new end-entity keypair signed by the same CA
+changed the certificate serial served by a tablet without changing that
+tablet pod's UID (SDS file watch). With optional `internalMapping: true`,
+the operator produced five CoreDNS rewrite rules. A platform-admin copy
+to k3s `coredns-custom` followed by the initial CoreDNS rollout made the
+base domain resolve from inside to the bootstrap ClusterIP and
+`tablet-0` resolve to its own ClusterIP. That platform copy is not performed
+by the operator.
+
+After provisioning `security.saslPlain` from an ephemeral Secret and enabling
+native Fluss ACLs, the operator rolled the servers in order. Its tablet health
+probe needed to use INTERNAL: an unauthenticated probe against the now-SASL
+CLIENT listener could not become Ready. The keys-driven restart sequencer also
+needed to record a successful pod deletion, otherwise it deleted the same
+tablet again after it became Ready. Both problems were fixed and tested.
+
+The admin used the native Java API to grant Alice READ/DESCRIBE on
+`native_sni.phase1`. **Alice read 20/20** through both Java and Rust over
+TLS/SNI + SASL. Bob authenticated but was **denied ACL administration with
+`AuthorizationException`** and could not read the table. On a fully rolled
+cluster the operator's internal Admin still observed GREEN after coordinator
+0 answered `NotLeader` and it retried coordinator 1.
+
+Subsequent failure/scale drills used the same authenticated external client:
+replacing tablet-0 while preserving its PVC changed its pod UID and Alice
+read the original 20/20 values; deleting the active coordinator-1 caused
+the next fresh bootstrap to discover coordinator-0 and again read 20/20.
+Scaling from two to three tablets created the third owned Service and TLSRoute
+automatically; the client discovered `tablet-2` on the same IP:443 and read
+20/20. The platform refreshed CoreDNS's optional mapping fragment; after a
+CoreDNS rollout, `tablet-2` resolved internally to its own ClusterIP
+(`10.43.190.181`), not the external Gateway IP. The platform update and
+CoreDNS rollout are **not** performed by the operator. Two Java client Jobs
+using the Flink 1.20 bundle also read 20/20 from inside Kubernetes: first
+through the public Gateway IP and then through split DNS, from pods on two
+different k3d nodes. DNS inside the latter resolved the base to
+`native-bootstrap` (`10.43.10.241`) and `tablet-0` to its per-server
+ClusterIP (`10.43.6.221`). These are worker-like clients, not Flink jobs.
+On 2026-10-01 an actual Flink 1.20 standalone cluster ran with a JobManager
+and two TaskManagers on different k3d nodes. A batch SQL job using the Fluss
+1.20 connector and the **single public TLS/SNI bootstrap** queried
+`SELECT COUNT(*) FROM native_sni.phase1` through SASL and returned **20**;
+Flink reported the job `FINISHED` with both tasks finished. This verifies a
+real distributed Flink read, but **not** checkpoint recovery, Flink failover,
+Spark, external object-store access, or a direct client read of remote snapshot
+objects. The lab's Flink deployment and credentials remained outside Git.
+See [native external access](native-external-access.md).
+
+One final scale-in from three tablets to two was admitted only after a fresh
+Admin check found tablet-2 registered with **zero** hosted replicas. The
+StatefulSet removed that pod; then the operator removed only its owned
+TLSRoute and Service. Alice still read 20/20 values through the base bootstrap.
+The retired tablet PVC was retained.
+
 ## Lab metrics (Prometheus)
 
 A minimal Prometheus (`prom/prometheus:v3.5.0`, Deployment + Service in the `monitoring` namespace, manifests kept out of this repo) scrapes Fluss pods via pod discovery filtered on the `prometheus.io/scrape=true` and `prometheus.io/port=9249` annotations. Enable the reporter per cluster through existing API — no operator change needed:
