@@ -1986,10 +1986,10 @@ spec:
                       bucket:
                         type: string
                       delegation:
-                        description: 'Required for workload identity in Fluss 1.0;
-                          with static keys the
+                        description: 'A role selects AssumeRole even without `type`;
+                          explicitly select
 
-                          server uses GetSessionToken unless AssumeRole is configured.'
+                          getSessionToken only when the backend supports it.'
                         nullable: true
                         properties:
                           roleArn:
@@ -2002,24 +2002,29 @@ spec:
                             enum:
                             - getSessionToken
                             - assumeRole
+                            - null
+                            nullable: true
                             type: string
-                        required:
-                        - type
                         type: object
                         x-kubernetes-validations:
-                        - message: assumeRole requires roleArn; getSessionToken cannot
-                            set roleArn or stsEndpoint
-                          rule: 'self.type == ''assumeRole'' ? has(self.roleArn) :
-                            !has(self.roleArn) && !has(self.stsEndpoint)'
+                        - message: getSessionToken cannot set roleArn
+                          rule: '!has(self.type) || self.type != ''getSessionToken''
+                            || !has(self.roleArn)'
                       endpoint:
                         nullable: true
                         type: string
-                      pathStyleAccess:
-                        default: false
-                        type: boolean
                       prefix:
                         description: A dedicated prefix for this FlussCluster; it
                           must not be shared.
+                        type: string
+                      provider:
+                        description: Optional backend presets; omitted is equivalent
+                          to AWS.
+                        enum:
+                        - aws
+                        - rustfs
+                        - null
+                        nullable: true
                         type: string
                       region:
                         type: string
@@ -2030,9 +2035,15 @@ spec:
                     - region
                     type: object
                     x-kubernetes-validations:
-                    - message: workloadIdentity requires assumeRole delegation
+                    - message: workloadIdentity requires delegation.roleArn and AssumeRole
                       rule: self.authentication.type != 'workloadIdentity' || (has(self.delegation)
-                        && self.delegation.type == 'assumeRole')
+                        && has(self.delegation.roleArn) && (!has(self.delegation.type)
+                        || self.delegation.type == 'assumeRole'))
+                    - message: AWS and custom S3 require delegation.roleArn or explicit
+                        getSessionToken
+                      rule: (has(self.provider) && self.provider == 'rustfs') || (has(self.delegation)
+                        && (has(self.delegation.roleArn) || (has(self.delegation.type)
+                        && self.delegation.type == 'getSessionToken')))
                 required:
                 - s3
                 type: object

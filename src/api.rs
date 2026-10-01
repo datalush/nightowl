@@ -441,31 +441,41 @@ pub struct RemoteStorageSpec {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[schemars(extend("x-kubernetes-validations" = [{
-    "rule": "self.authentication.type != 'workloadIdentity' || (has(self.delegation) && self.delegation.type == 'assumeRole')",
-    "message": "workloadIdentity requires assumeRole delegation"
+    "rule": "self.authentication.type != 'workloadIdentity' || (has(self.delegation) && has(self.delegation.roleArn) && (!has(self.delegation.type) || self.delegation.type == 'assumeRole'))",
+    "message": "workloadIdentity requires delegation.roleArn and AssumeRole"
+}, {
+    "rule": "(has(self.provider) && self.provider == 'rustfs') || (has(self.delegation) && (has(self.delegation.roleArn) || (has(self.delegation.type) && self.delegation.type == 'getSessionToken')))",
+    "message": "AWS and custom S3 require delegation.roleArn or explicit getSessionToken"
 }]))]
 #[serde(rename_all = "camelCase")]
 pub struct S3StorageSpec {
+    /// Optional backend presets; omitted is equivalent to AWS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<S3Provider>,
     pub bucket: String,
     /// A dedicated prefix for this FlussCluster; it must not be shared.
     pub prefix: String,
     pub region: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    #[serde(default)]
-    pub path_style_access: bool,
     #[schemars(with = "S3AuthenticationSchema")]
     pub authentication: S3AuthenticationSpec,
-    /// Required for workload identity in Fluss 1.0; with static keys the
-    /// server uses GetSessionToken unless AssumeRole is configured.
+    /// A role selects AssumeRole even without `type`; explicitly select
+    /// getSessionToken only when the backend supports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<S3DelegationSchema>")]
     pub delegation: Option<S3DelegationSpec>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum S3Provider {
+    Aws,
+    Rustfs,
+}
+
 // Kubernetes structural CRD schemas cannot hoist different definitions of
-// `type` from a tagged enum's variants. These shapes keep the wire format and
-// discriminator enum while Serde's real types reject invalid combinations.
+// `type` from a tagged enum's variants. This placeholder preserves the
+// authentication wire format while Serde rejects invalid combinations.
 #[allow(dead_code)]
 #[derive(Deserialize, Serialize, JsonSchema)]
 #[schemars(extend("x-kubernetes-validations" = [{
@@ -487,23 +497,25 @@ enum S3AuthenticationType {
     Secret,
 }
 
-#[allow(dead_code)]
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[schemars(extend("x-kubernetes-validations" = [{
-    "rule": "self.type == 'assumeRole' ? has(self.roleArn) : !has(self.roleArn) && !has(self.stsEndpoint)",
-    "message": "assumeRole requires roleArn; getSessionToken cannot set roleArn or stsEndpoint"
+    "rule": "!has(self.type) || self.type != 'getSessionToken' || !has(self.roleArn)",
+    "message": "getSessionToken cannot set roleArn"
 }]))]
 #[serde(rename_all = "camelCase")]
-struct S3DelegationSchema {
+pub struct S3DelegationSpec {
     #[serde(rename = "type")]
-    kind: S3DelegationType,
-    role_arn: Option<String>,
-    sts_endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<S3DelegationType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_arn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sts_endpoint: Option<String>,
 }
 
-#[derive(Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-enum S3DelegationType {
+pub enum S3DelegationType {
     GetSessionToken,
     AssumeRole,
 }
@@ -527,21 +539,6 @@ pub struct S3SecretRef {
     pub name: String,
     pub access_key_key: String,
     pub secret_key_key: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum S3DelegationSpec {
-    GetSessionToken,
-    AssumeRole {
-        role_arn: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        sts_endpoint: Option<String>,
-    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]

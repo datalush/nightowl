@@ -7,3 +7,4 @@
 //! secret markers, when implemented) will live in a `common` module here.
 
 pub mod s3;
+pub mod s3_profile;

@@ -37,13 +37,15 @@ spec:
     onNonEmptyTabletServer: Block
   remoteStorage:
     s3:
+      provider: rustfs
       bucket: fluss-lab
       prefix: clusters/data/rustfs-lab
       region: us-east-1
       # Placeholder: replace with your S3-compatible endpoint. Never commit
       # real infrastructure addresses or credentials here.
       endpoint: http://s3-compatible.example.internal:9000
-      pathStyleAccess: true
+      # The Secret must contain IAM user keys with an applicable bucket policy;
+      # root and service-account keys cannot call RustFS AssumeRole.
       authentication:
         type: secret
         secretRef:

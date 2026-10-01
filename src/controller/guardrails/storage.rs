@@ -13,6 +13,7 @@ use kube::{Api, Client};
 use super::super::reconcilers::Observation;
 use crate::api::{FlussCluster, S3AuthenticationSpec, S3SecretRef};
 use crate::controller::Error;
+use crate::resources::server_config::storage::backends::s3_profile;
 
 /// Check the S3 references of a cluster against live cluster state.
 ///
@@ -24,6 +25,12 @@ pub async fn check(
     namespace: &str,
     cluster: &FlussCluster,
 ) -> Result<Vec<Observation>, Error> {
+    if let Err(message) = s3_profile::resolve(&cluster.spec.remote_storage.s3) {
+        return Ok(vec![Observation::StorageBlocked {
+            name: "s3 delegation".into(),
+            message,
+        }]);
+    }
     match &cluster.spec.remote_storage.s3.authentication {
         S3AuthenticationSpec::Secret { secret_ref } => {
             check_secret(client, namespace, secret_ref).await

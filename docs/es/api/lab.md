@@ -193,6 +193,21 @@ El StatefulSet retiró ese pod y el operador eliminó únicamente su TLSRoute
 y Service propios. Alice volvió a leer 20/20 valores por el bootstrap base;
 el PVC del tablet retirado se conservó.
 
+El 2026-10-01 se aplicaron el CRD y la imagen del operador actualizados al
+lab aislado `native-sni`. El perfil RustFS generó acceso por ruta,
+`AssumeRole` y STS en el endpoint declarado sin pedir un ARN ficticio al
+usuario. Un **usuario IAM** RustFS efímero con política limitada al bucket
+sustituyó las claves root en el Secret de Fluss; una sesión STS `AssumeRole`
+pudo acceder al bucket. Un NodePort k3d permitió usar el mismo endpoint S3/STS
+desde tablets y host. Se cargaron el conector Spark 3.5 y el plugin S3 de
+Fluss antes que las clases Hadoop antiguas de Spark (sin este orden aparecía
+`NoSuchMethodError` para `Configuration.getEnumSet`). PySpark local leyó el
+snapshot KV de `lab_spark.demo`, hizo upsert y releyó **3/3** valores, y los
+releyó tras reemplazar un tablet y tras parar/arrancar `native-sni` completo:
+**cero errores STS 403**. Los datos perdidos con el bucket efímero anterior
+no se recuperaron. Se verificó la red Docker/k3d local, no S3 público ni IAM
+AWS.
+
 ## Métricas del lab (Prometheus)
 
 Un Prometheus mínimo (`prom/prometheus:v3.5.0`, Deployment + Service en el namespace `monitoring`, manifiestos fuera de este repo) scrapea los pods Fluss por discovery filtrado con las anotaciones `prometheus.io/scrape=true` y `prometheus.io/port=9249`. El reporter se activa por clúster con la API existente —sin cambios en el operador:
