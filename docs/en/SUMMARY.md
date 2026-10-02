@@ -9,8 +9,8 @@
 - [FlussCluster](api/fluss-cluster.md)
 - [Remote storage and credentials](api/remote-storage.md)
 - [Status and conditions](api/status.md)
-- [FIP-41 audit and Admin matrix](api/fip41.md)
-- [Lab recreation and versions](api/lab.md)
+- [Native external access](api/native-external-access.md)
+- [Local lab](api/lab.md)
 
 # Configuration examples
 

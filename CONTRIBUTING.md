@@ -9,8 +9,9 @@ policy lives in `deny.toml`).
 
 Practical rules this repo enforces:
 
-- Verify in the lab (k3d), never assert without evidence. See
-  `docs/en/api/lab.md` for recreation, reset, and the version record.
+- Verify in the lab (k3d), never assert without dated evidence. See
+  `docs/en/api/lab.md` for setup and reset; record test evidence with the
+  corresponding issue or change, not in the user guide.
 - Every behavior change carries unit tests (`cargo test`), `cargo clippy`
   clean, and `cargo fmt`.
 - Docs are bilingual (EN+ES): behavior changes update both sides.

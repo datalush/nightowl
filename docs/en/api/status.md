@@ -1,56 +1,47 @@
 # Status and conditions
 
-`status` describes observed state. It is **not** supplied by the person creating a `FlussCluster`. Fields stay absent until the controller can actually observe them; an absent field is honest, an invented one is not.
+The operator writes `status` from observations; it is not part of the configuration you apply. Fields whose values cannot be observed stay absent.
 
 ```yaml
 status:
   observedGeneration: 3
-  observedConfigHash: "sha256:example"
-  observedVersion: "1.0.0"
   clusterHealth:
     status: GREEN
-    numReplicas: 120
-    inSyncReplicas: 120
-    numLeaderReplicas: 40
-    activeLeaderReplicas: 40
-  coordinatorEndpoints:
-    - production-coordinator-0.production-coordinator-hs.data.svc.cluster.local:9124
-    - production-coordinator-1.production-coordinator-hs.data.svc.cluster.local:9124
+    numReplicas: 2
+    inSyncReplicas: 2
+    numLeaderReplicas: 1
+    activeLeaderReplicas: 1
   coordinator:
+    desired: 1
+    ready: 1
+  tabletServers:
     desired: 2
     ready: 2
-    activePod: production-coordinator-0
-  tabletServers:
-    desired: 3
-    ready: 3
     pods:
       - name: production-tablet-server-0
         ready: true
-        assignedTablets: 40
-        replicaHealth:
-          numReplicas: 40
-          inSyncReplicas: 40
-          numLeaderReplicas: 13
-          activeLeaderReplicas: 13
   conditions:
     - type: FlussReachable
       status: "True"
-      reason: CoordinatorResponding
-      message: A CoordinatorServer responded to a Fluss admin request.
-      evidence:
-        - "2 CoordinatorServers configured"
-      lastTransitionTime: "2026-09-25T12:00:00Z"
+      reason: FlussReachable
+      message: coordinator reachable at production-coordinator-0:9123
+      evidence: ["coordinator production-coordinator-0:9123 reachable"]
+      lastTransitionTime: "<observed transition time>"
 ```
 
-This is a **shape example**; endpoint names and health counts are illustrative. `observedVersion` must come from evidence of the running cluster, not just a copy of `spec.version`.
+This is an excerpt, not a complete status object; the names and counts are illustrative. `observedVersion` is not simply copied from `spec.version`.
 
 ## Fluss-side health
 
-When the coordinator answers over the internal listener, the controller also fills `clusterHealth` (global replica/ISR/leader counts from `getClusterHealth`), `coordinatorEndpoints` (coordinator servers seen in membership), `coordinator` (desired vs registered) and `tabletServers` (desired vs registered members, one entry per server), plus the `FlussReachable` and `ClusterHealthy` conditions. Membership is Fluss-observed — strictly more honest than pod Ready for "how many servers serve".
+When the coordinator answers over the internal listener, the operator records
+global replica and leader counts in `clusterHealth`. It also reports observed
+coordinator endpoints and registered Coordinator and TabletServer counts.
+`FlussReachable` and `ClusterHealthy` reflect the probe. Fluss membership,
+not pod readiness alone, determines how many servers are available.
 
 Probes run at most every 60 seconds per cluster (in-memory rate limit, no status churn); between probes the last observed values stand. An unreachable cluster reports `FlussReachable=False` with the cause and leaves `ClusterHealthy` at its previous value — or absent when never observed. Health observation never blocks convergence and never retries hot.
 
-Per-pod `assignedTablets` and `replicaHealth` populate when the server answers `DescribeTabletServers` (fork image `1.0.0-midnattsol.1` and later, verified live 2026-09-27); `coordinator.activePod` stays absent. Against stock Fluss 1.0 they remain absent while unavailable, never invented from Pod readiness.
+Per-pod `assignedTablets` and `replicaHealth` populate when the server answers `DescribeTabletServers` (available in the compatible fork image, not stock Fluss 1.0). `coordinator.activePod` stays absent; the operator does not infer it from Pod readiness.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
@@ -66,7 +57,11 @@ Per-pod `assignedTablets` and `replicaHealth` populate when the server answers `
 | `gateway` | optional object | Desired/ready Gateway replicas plus the in-cluster URL; absent unless requested. |
 | `conditions` | list | Independent operational statements with evidence and transition time. |
 
-Each condition has `type`, `status`, `reason`, `message`, `evidence`, and `lastTransitionTime`. The schema restricts `status` to `"True"`, `"False"`, or `"Unknown"`. `NativeRoutesProgrammed=True` means the Gateway reports Programmed and every TLSRoute has fresh Accepted/ResolvedRefs conditions, **not** that DNS, TLS or a remote client has succeeded. `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, `Stalled` (sequenced-restart stalls), `DataAtRisk` (RED health with hosted replicas but zero active leaders: observe-and-report only) and `OperationBlocked` (dynamic-config rejections) also run today. Other enum values remain reserved for later work.
+Each condition has `type`, `status`, `reason`, `message`, `evidence` and `lastTransitionTime`. Status is `"True"`, `"False"` or `"Unknown"`.
+
+`NativeRoutesProgrammed=True` means the Gateway and TLSRoutes report their current programmed/accepted state; it does not verify DNS or a remote TLS connection. Other conditions include `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, `Stalled` and `OperationBlocked`.
+
+`DataAtRisk=True` reports Fluss recovery evidence (`dataAtRisk`), even if the cluster is now GREEN, or RED health with hosted replicas and no active leaders. It reports risk; the operator does not restore data. Without server-side recovery evidence, the condition can be `Unknown`.
 
 Fluss 1.0's `getClusterHealth()` supports global counters. The per-pod `assignedTablets` and `replicaHealth` fields require the per-server Admin read API: absent upstream in 1.0, provided by the fork image and observed into status when the server answers; they must remain absent while unavailable, not be invented from Pod readiness.
 

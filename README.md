@@ -23,7 +23,7 @@ doesn't: `docs/en/current-state.md`.
 Start from the manifests in `docs/en/examples/` (each carries its
 verification status): [RustFS lab](docs/en/examples/rustfs.md) for
 Secret-based S3, [AWS EKS](docs/en/examples/aws-eks.md) for workload
-identity. Lab recreation, reset and versions: `docs/en/api/lab.md`.
+  identity. Local lab setup and reset: `docs/en/api/lab.md`.
 
 ## Contributing
 

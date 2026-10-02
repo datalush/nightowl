@@ -1,56 +1,49 @@
 # Estado y condiciones
 
-`status` describe lo observado. **No** lo establece quien crea un `FlussCluster`. Los campos quedan ausentes hasta que el controlador puede observarlos de verdad; ausente es honesto, inventado no.
+El operador escribe `status` a partir de lo que observa; no forma parte de la configuración que aplicas. Los campos que no puede comprobar quedan ausentes.
 
 ```yaml
 status:
   observedGeneration: 3
-  observedConfigHash: "sha256:ejemplo"
-  observedVersion: "1.0.0"
   clusterHealth:
     status: GREEN
-    numReplicas: 120
-    inSyncReplicas: 120
-    numLeaderReplicas: 40
-    activeLeaderReplicas: 40
-  coordinatorEndpoints:
-    - production-coordinator-0.production-coordinator-hs.data.svc.cluster.local:9124
-    - production-coordinator-1.production-coordinator-hs.data.svc.cluster.local:9124
+    numReplicas: 2
+    inSyncReplicas: 2
+    numLeaderReplicas: 1
+    activeLeaderReplicas: 1
   coordinator:
+    desired: 1
+    ready: 1
+  tabletServers:
     desired: 2
     ready: 2
-    activePod: production-coordinator-0
-  tabletServers:
-    desired: 3
-    ready: 3
     pods:
       - name: production-tablet-server-0
         ready: true
-        assignedTablets: 40
-        replicaHealth:
-          numReplicas: 40
-          inSyncReplicas: 40
-          numLeaderReplicas: 13
-          activeLeaderReplicas: 13
   conditions:
     - type: FlussReachable
       status: "True"
-      reason: CoordinatorResponding
-      message: Un CoordinatorServer respondió a una consulta administrativa de Fluss.
-      evidence:
-        - "2 CoordinatorServers configurados"
-      lastTransitionTime: "2026-09-25T12:00:00Z"
+      reason: FlussReachable
+      message: coordinator reachable at production-coordinator-0:9123
+      evidence: ["coordinator production-coordinator-0:9123 reachable"]
+      lastTransitionTime: "<instante de la transición>"
 ```
 
-Es un **ejemplo de estructura**; los endpoints y contadores son ilustrativos. `observedVersion` debe basarse en el clúster real, no copiarse de `spec.version`.
+Es un fragmento, no un `status` completo; los nombres y contadores son ilustrativos. `observedVersion` no se copia sin más de `spec.version`.
 
 ## Salud del lado Fluss
 
-Cuando el coordinator responde por el listener interno, el controlador rellena además `clusterHealth` (contadores globales de réplicas, ISR y líderes desde `getClusterHealth`), `coordinatorEndpoints` (coordinators vistos en membership), `coordinator` (deseadas frente a registradas) y `tabletServers` (deseadas frente a miembros registrados, una entrada por servidor), más las condiciones `FlussReachable` y `ClusterHealthy`. La membresía la observa Fluss — estrictamente más honesto que el Ready de pods para saber "cuántos servidores sirven".
+Cuando el Coordinator responde por el listener interno, el operador registra
+en `clusterHealth` los contadores globales de réplicas y líderes. También
+informa de los endpoints de Coordinator y de los servidores registrados en
+`coordinator` y `tabletServers`. Las condiciones `FlussReachable` y
+`ClusterHealthy` reflejan esta consulta. Para saber cuántos servidores están
+disponibles, importa la membresía de Fluss, no solo si Kubernetes marca sus
+pods como listos.
 
 Las sondas corren como mucho cada 60 segundos por clúster (límite en memoria, sin churn en `.status`); entre sondas valen los últimos valores observados. Un clúster inalcanzable reporta `FlussReachable=False` con la causa y deja `ClusterHealthy` en su valor previo — o ausente si nunca se observó. La observación de salud nunca bloquea la convergencia ni reintenta en caliente.
 
-`assignedTablets` y `replicaHealth` por pod se rellenan cuando el servidor responde `DescribeTabletServers` (imagen del fork `1.0.0-midnattsol.1` en adelante, verificado en vivo 2026-09-27); `coordinator.activePod` sigue ausente. Contra Fluss 1.0 stock quedan ausentes mientras no exista, sin deducirse de que el pod esté listo.
+`assignedTablets` y `replicaHealth` por pod se rellenan si el servidor responde `DescribeTabletServers` (disponible en la imagen compatible del fork, no en Fluss 1.0 estándar). `coordinator.activePod` queda ausente; el operador no lo deduce de que el pod esté listo.
 
 | Campo | Tipo | Significado |
 | --- | --- | --- |
@@ -66,7 +59,11 @@ Las sondas corren como mucho cada 60 segundos por clúster (límite en memoria, 
 | `gateway` | objeto opcional | Réplicas deseadas/listas del Gateway más la URL interna; ausente si no se pide. |
 | `conditions` | lista | Indicadores operativos independientes con evidencia y momento de transición. |
 
-Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. `status` acepta `"True"`, `"False"` y `"Unknown"`. `NativeRoutesProgrammed=True` indica Gateway programado y TLSRoutes Accepted/ResolvedRefs con generación actual; **no** prueba DNS, TLS ni un cliente remoto. También se emiten `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, `Stalled` (reinicio secuenciado), `DataAtRisk` (sin líderes activos sobre réplicas alojadas: solo observar) y `OperationBlocked` (rechazos de configuración dinámica). Los demás valores del enum quedan reservados.
+Cada condición contiene `type`, `status`, `reason`, `message`, `evidence` y `lastTransitionTime`. `status` acepta `"True"`, `"False"` y `"Unknown"`.
+
+`NativeRoutesProgrammed=True` indica que Gateway y TLSRoutes informan de rutas programadas y aceptadas; no prueba DNS ni una conexión TLS desde fuera. También se emiten `KubernetesResourcesReady`, `RemoteStorageReady`, `FlussReachable`, `ClusterHealthy`, `S3CredentialsStale`, `Stalled` y `OperationBlocked`.
+
+`DataAtRisk=True` indica que Fluss ha informado de riesgo durante la recuperación (`dataAtRisk`), incluso si ahora está GREEN, o que hay réplicas alojadas sin líderes activos con salud RED. El operador informa del riesgo, pero no restaura datos. Sin evidencia de recuperación del servidor, la condición puede ser `Unknown`.
 
 `getClusterHealth()` de Fluss 1.0 proporciona contadores globales. `assignedTablets` y `replicaHealth` por pod requieren la API Admin de lectura por servidor: ausente upstream en 1.0, provista por la imagen del fork y observada en el status cuando el servidor responde; deben quedar ausentes mientras no exista, no deducirse de que el pod esté listo.
 

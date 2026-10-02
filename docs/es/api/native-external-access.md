@@ -112,10 +112,10 @@ la ruta pública si es accesible o la configuración privada CLIENT.
 
 ## Verificación
 
-Probar Java y Rust desde fuera con bootstrap único `fluss.example.com:443`,
-TLS y SASL: escribir y leer a través de varios tablets, permitir READ a Alice
-y denegar a Bob, reiniciar un tablet conservando PVC, cambiar el líder y
-escalar. Incluir workers Spark/Flink, no solo el driver. Las lecturas remotas
-pueden requerir acceso adicional a S3: TLS RPC no proxifica ese tráfico.
-Consultar [evidencia de laboratorio](lab.md) para el alcance demostrado. El
-anterior diseño por puertos y TCPRoutes fue experimental; no es la API actual.
+Prueba un cliente TLS/SASL con el único bootstrap `fluss.example.com:443`.
+Comprueba escrituras y lecturas entre tablets, permisos ACL, el reinicio de
+un tablet conservando su PVC y el cambio de líder. Si usas Spark o Flink,
+prueba también los workers, no solo el driver. Las lecturas de datos remotos
+pueden necesitar acceso directo a S3: el TLS del protocolo Fluss no transporta
+el tráfico del almacén de objetos. Consulta el [estado actual](../current-state.md)
+para saber qué se ha probado.

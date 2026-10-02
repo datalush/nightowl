@@ -1,6 +1,6 @@
 # Estado actual
 
-El esquema de `FlussCluster` se define en `operator/src/api.rs` y el controlador lo convierte en clústeres Fluss en ejecución. Lo siguiente está verificado en vivo en k3d salvo indicación contraria.
+La API de `FlussCluster` se define en `src/api.rs`. El operador se ha probado en k3d; la tabla indica cuándo falta probar un backend concreto.
 
 | Capacidad | Estado actual |
 | --- | --- |
@@ -11,12 +11,13 @@ El esquema de `FlussCluster` se define en `operator/src/api.rs` y el controlador
 | RBAC de mínimo privilegio | Implementado; verificado con su ServiceAccount sin ningún `Forbidden`. |
 | Actualizar `.status` | Implementado: recursos, almacenamiento, alcanzabilidad y salud con evidencia. |
 | JVM heap, PVCs, PDBs, scheduling, Service cliente | Implementado; heaps sobredimensionados bloqueados antes de crear pods. |
-| Reinicio, actualización, reducción o recuperación seguros | Parcial: reinicios y recuperación verificados; actualización controlada y scale-in pendientes. |
-| Restore entre servidores, tokens de cliente, AWS real | Aún sin verificar; se sigue por separado. |
+| Reinicios y scale-in | Reinicios secuenciados implementados; el scale-in exige una lectura reciente que demuestre que los servidores salientes están registrados y vacíos. Fluss 1.0 estándar no ofrece esa lectura. No hay rebalanceo automático. |
+| Recuperación y tokens de cliente | Reemplazo de disco y promoción de un follower probados con RustFS; tokens S3 emitidos por Fluss probados con credenciales de usuario IAM de RustFS. La recuperación la realiza Fluss, no el operador. |
+| AWS EKS | Hay un manifiesto de ejemplo; IAM, tokens y recuperación aún no se han probado en AWS. |
 
 ## Cómo utilizar los ejemplos
 
-Los manifiestos despliegan clústeres reales; cada uno indica su estado de verificación. Las páginas de [EKS](examples/aws-eks.md) y [RustFS](examples/rustfs.md) explican las distintas opciones de autenticación y delegación. Tener una URI S3 no demuestra que Fluss pueda emitir tokens delegados ni recuperar una tableta KV en otro servidor.
+Los ejemplos de [EKS](examples/aws-eks.md) y [RustFS](examples/rustfs.md) requieren credenciales distintas. Ni una URI S3 ni `RemoteStorageReady=True` demuestran que Fluss pueda emitir tokens o recuperar datos. Sustituye el endpoint de ejemplo del manifiesto RustFS antes de usarlo.
 
 ## Documentación local
 

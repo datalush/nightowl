@@ -14,15 +14,14 @@ Fluss usa discos locales de los TabletServers para los datos recientes y **almac
 | `authentication` | objeto con discriminador | Sí | `workloadIdentity` o `secret`. |
 | `delegation` | objeto | No | `roleArn` implica `AssumeRole`; `type` opcional elige el modo y `stsEndpoint` sobreescribe STS. |
 
-Si se omite `provider`, se aplican los defaults AWS; `provider: aws` es
-equivalente. **Siempre se usa direccionamiento por ruta**; no hay un campo
-para elegir el estilo S3. Un endpoint S3 personalizado **no** selecciona otro
-proveedor: la delegación y STS se configuran explícitamente. `AssumeRole` es
-el modo predeterminado: AWS y endpoints personalizados exigen un
-`delegation.roleArn` real. `GetSessionToken` solo se usa al seleccionar
-`delegation.type: getSessionToken`. Cambiar perfil o delegación exige reinicio;
-cambiar bucket/prefijo requiere migrar datos. Antes de actualizar el operador
-hay que adaptar o recrear los CR experimentales sin rol.
+Si omites `provider`, se usan los valores predeterminados de AWS. El acceso S3
+siempre es por ruta. Un endpoint personalizado no activa el perfil RustFS:
+configura su delegación y su endpoint STS expresamente.
+
+AWS y los endpoints personalizados exigen un `delegation.roleArn` real para el
+modo `AssumeRole` predeterminado. Usa `delegation.type: getSessionToken` solo
+si el backend lo admite. Cambiar proveedor o delegación requiere un reinicio;
+cambiar bucket o prefijo requiere migrar los datos.
 
 El reconciler convierte `bucket` y `prefix` en `s3://<bucket>/<prefix>` dentro de la clave singular `remote.data.dir` y configura `s3.region`, `s3.endpoint` y `s3.path-style-access` cuando corresponde. La clave singular es deliberada: la imagen `apache/fluss:1.0.0` ignora el plural `remote.data.dirs` y aborta el arranque con ruta remota nula (ver ADR-0001). Tras escribir datos, cambiar la ubicación requiere una migración, no simplemente generar otra configuración para los pods.
 
@@ -42,7 +41,15 @@ delegation:
 
 En concreto, con `workloadIdentity` no se genera **ninguna clave de credenciales**: ni `s3.access-key`, ni `s3.secret-key`, ni bloque `config.providers`. La única clave relacionada con la identidad procede de `delegation` (`s3.assumed.role.arn`, obligatoria en este modo).
 
-El rol IAM del ServiceAccount y `delegation.roleArn` **son cosas distintas**. El primero identifica al servidor Fluss y necesita acceso a S3 y permiso `sts:AssumeRole`. El segundo es el rol que Fluss asume para emitir credenciales temporales a sus clientes. Un ARN implica `AssumeRole` sin escribir `type`; `provider: aws` es opcional. Fluss 1.0 exige un rol asumible cuando el servidor obtiene sus credenciales de la cadena predeterminada de AWS. EKS Pod Identity usa el proveedor de credenciales para contenedores del SDK; hay que probar su integración con Fluss en EKS antes de declararla verificada.
+El rol IAM del ServiceAccount identifica al servidor Fluss: necesita acceso a
+S3 y permiso para asumir el rol de cliente. `delegation.roleArn` identifica
+**ese rol de cliente**, con el que se emiten credenciales temporales. Son
+roles distintos. Indicar un ARN selecciona `AssumeRole` sin añadir `type`.
+
+Fluss 1.0 exige ese rol cuando el servidor obtiene las credenciales de la
+cadena predeterminada de AWS. EKS Pod Identity usa el proveedor de
+credenciales para contenedores del SDK; su integración con Fluss aún no se
+ha probado en EKS.
 
 ### Secret de Kubernetes existente
 
@@ -66,7 +73,11 @@ s3.access-key: ${directory:/etc/fluss/secrets/s3:access-key}
 s3.secret-key: ${directory:/etc/fluss/secrets/s3:secret-key}
 ```
 
-Fluss resuelve los marcadores al arrancar, por lo que rotar el Secret exige reiniciar los servidores afectados. El montaje está implementado (verificado en vivo contra RustFS). La rotación se detecta, no se cura: los pods fijan el hash del Secret en su plantilla, y si difiere del Secret vivo aparece `S3CredentialsStale=True` nombrando los pods afectados y el montaje stale — sin reiniciar nada. La política de reinicio va por separado. Las claves estáticas AWS también requieren rol salvo selección explícita de `getSessionToken`.
+Fluss resuelve los marcadores al arrancar, así que al rotar el Secret hay
+que reiniciar los servidores. El operador compara el Secret con el hash
+fijado en cada pod y muestra `S3CredentialsStale=True` si no coinciden; no
+reinicia los pods por la rotación. Las claves estáticas AWS también requieren
+un rol, salvo que se seleccione `getSessionToken` expresamente.
 
 ### Perfil RustFS
 
@@ -91,21 +102,43 @@ tokens: `RemoteStorageReady=True` no significa que los clientes estén listos.
 
 ## La delegación es otro requisito de compatibilidad
 
-Que el servidor lea y escriba objetos S3 no demuestra que Fluss pueda emitir credenciales para clientes Flink/Spark que leen datos remotos. El fallback propio de Fluss 1.0 llama a `GetSessionToken` con claves estáticas; el Operador **no** lo utiliza en silencio: predetermina `AssumeRole` y exige un `delegation.roleArn` real para AWS/servicios personalizados. `type: getSessionToken` lo selecciona explícitamente cuando el backend lo soporte. Con identidad de pod hace falta `delegation.roleArn` explícito. En servicios S3 compatibles, `stsEndpoint` sobrescribe el endpoint STS en ambos modos. El perfil no crea identidades IAM, roles, buckets ni un endpoint accesible a workers Spark externos: son entradas de plataforma.
+Que un servidor escriba en S3 no demuestra que los clientes Flink o Spark
+puedan obtener credenciales temporales para leer datos remotos. Para AWS y
+endpoints personalizados, el operador usa `AssumeRole` con un `roleArn` real;
+no cambia a `GetSessionToken` sin pedirlo. La identidad de pod también exige
+un ARN. `stsEndpoint` permite cambiar la dirección de STS. Las identidades
+IAM, los buckets y el acceso de red para workers externos se configuran aparte.
 
 | Backend | Qué expresa la API | Qué queda por verificar |
 | --- | --- | --- |
 | AWS S3 | Identidad EKS con `assumeRole`; claves estáticas con el modo STS elegido. | Planificado: confianza y permisos IAM, tokens para clientes, snapshots, recuperación y failover. |
-| RustFS | Secret, endpoint propio, acceso por ruta, AssumeRole. | Verificado el 2026-09-26 contra la instancia del lab (1.0.0): round-trip de bucket desde pods del clúster, credenciales `AssumeRole` que autorizan operaciones S3, snapshots KV escritos por tablets gestionadas bajo el prefijo del clúster y recuperación de un disco perdido desde esos snapshots (ver abajo). Los tokens emitidos por Fluss quedan aparte. |
+| RustFS | Secret, endpoint propio, acceso por ruta, AssumeRole. | Probado con RustFS 1.0.0: escrituras S3, snapshots KV, reemplazo de disco y tokens de cliente. Consulta los límites más abajo. |
 
-Si se omite `delegation` con AWS u otro endpoint, el operador bloquea los nuevos workloads con un motivo claro en vez de llamar a AWS STS silenciosamente. El CRD exige rol con identidad de pod y rechaza `getSessionToken` combinado con rol. Hay que volver a aplicar el CRD generado antes de usar perfiles u omitir `delegation.type`: uno anterior puede rechazar la forma nueva. El reconciler verifica el Secret o ServiceAccount y bloquea combinaciones inválidas antes de iniciar workloads; `RemoteStorageReady` solo observa **referencias**, no conectividad S3/STS ni red externa. Las operaciones S3, los snapshots KV, la recuperación de un disco y el flujo de tokens emitidos por Fluss se probaron contra RustFS con usuario IAM (pruebas separadas); AWS sigue sin probarse. Los ejemplos no son certificaciones de compatibilidad.
+Si se omite la delegación con AWS u otro endpoint personalizado, el operador
+bloquea los nuevos pods. La CRD exige un rol con identidad de pod y rechaza
+`getSessionToken` combinado con un rol. Al actualizar, instala la CRD
+correspondiente. El operador comprueba las referencias al Secret o al
+ServiceAccount antes de arrancar; `RemoteStorageReady` **no** comprueba S3,
+STS ni el acceso desde fuera. Los flujos RustFS se probaron con claves de
+usuario IAM; AWS sigue sin probarse.
 
 ## Recuperación desde snapshots remotos
 
-Perder el disco de un TabletServer con réplicas supervivientes se recupera de forma nativa: el pod de reemplazo se reincorpora y se pone al día desde sus pares más los snapshots KV remotos, sin orquestación del operador. Verificado el 2026-09-26 contra el RustFS del lab (RF=3, 100 filas escritas, un PVC más su pod borrados): el pod nuevo estuvo Ready en unos cuatro minutos sin pasos manuales, las condiciones se mantuvieron veraces durante el proceso y las 100 filas se leyeron después. El papel del operador es observar e informar mediante `ClusterHealthy` y las condiciones por área. La pérdida total sin réplica viva en ningún sitio no la recupera ningún flujo —no hay de dónde recuperar— y queda como límite documentado, no como trabajo pendiente.
+Fluss puede recuperar el disco perdido de un TabletServer a partir de otras
+réplicas y snapshots KV remotos, sin que el operador mueva datos. Se ha
+probado con RustFS, incluido el reemplazo y promoción de un follower. El
+operador informa del estado. Con RF=1, recuperar un snapshot **no** demuestra
+que se hayan conservado todas las escrituras confirmadas: comprueba
+`DataAtRisk`. Los snapshots no garantizan pérdida cero si desaparecen todas
+las réplicas vivas.
 
 ## Flujo de tokens de cliente vía AssumeRole
 
-Con `delegation: { type: assumeRole, roleArn, stsEndpoint }` los servidores obtienen credenciales S3 de sesión vía AssumeRole contra el STS del backend (el log muestra `S3DelegationTokenProvider … Obtaining session credentials via AssumeRole`), y los clientes piden tokens de seguridad del filesystem por el RPC `GetFileSystemSecurityToken`. Verificado el 2026-09-27 contra el RustFS del lab con un usuario IAM acotado al lab (`fluss-clients`, política limitada al bucket del lab): 50 filas escritas y leídas, snapshots fluyendo, y un token pedido por el cliente (access key, secreto, JWT de sesión) listando y leyendo un objeto `_METADATA` real de snapshot. El backend acepta el ARN del rol por compatibilidad AWS y deriva la sesión de las políticas de la credencial firmante; no hizo falta sentencia explícita `sts:AssumeRole` (el validador de políticas rechaza `Resource: "*"`).
+Con `AssumeRole`, Fluss obtiene credenciales de sesión del STS del backend.
+Los clientes piden tokens mediante `GetFileSystemSecurityToken`. En RustFS,
+un token emitido a partir de un usuario IAM con acceso al bucket permitió
+leer un objeto de un snapshot KV. Esto no verifica IAM en AWS ni la red de
+workers externos. RustFS acepta el ARN convencional del perfil por
+compatibilidad; los permisos proceden de la política del usuario IAM.
 
 Fuentes: [configuración S3 de Fluss 1.0](https://fluss.apache.org/docs/maintenance/tiered-storage/filesystems/s3/), [proveedores de secretos de Fluss 1.0](https://fluss.apache.org/docs/security/secrets/), [IRSA de EKS](https://docs.aws.amazon.com/eks/latest/userguide/iam-roles-for-service-accounts.html), [EKS Pod Identity](https://docs.aws.amazon.com/eks/latest/userguide/pod-identities.html) y [documentación STS de RustFS](https://docs.rustfs.com/en/security-compliance/iam/sts).

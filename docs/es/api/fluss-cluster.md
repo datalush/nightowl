@@ -1,8 +1,8 @@
 # FlussCluster
 
-`FlussCluster` es un recurso personalizado de Kubernetes limitado a un namespace, con `apiVersion: fluss.datalush.com/v1alpha1`. Su definición canónica está en `operator/src/api.rs`. La CRD se registra para todo el clúster de Kubernetes, pero cada instancia pertenece a un namespace. El controlador crea sus recursos en ese mismo namespace y deriva sus nombres de `metadata.name`.
+`FlussCluster` es un recurso de Kubernetes con `apiVersion: fluss.datalush.com/v1alpha1`. Su definición está en `src/api.rs`. La CRD se instala para todo Kubernetes, pero el operador crea los recursos de cada clúster en su propio namespace.
 
-> Instalar el CRD generado por la versión del operador que se ejecuta. Consultar la [evidencia de laboratorio](lab.md) para comportamientos y versiones verificados.
+> Instala la CRD de la misma versión que el operador. Consulta el [laboratorio local](lab.md) para probar un ejemplo.
 
 ## Campos principales de spec
 
@@ -20,7 +20,7 @@
 | `rollingUpgrade` | objeto | No | Tiempos para restarts ordenados y conscientes de Fluss (tablets de la cola primero, luego coordinator, con GREEN y estabilización). |
 | `scaleIn` | objeto | No | Política de seguridad al retirar un TabletServer. |
 | `defaults` | objeto | No | Valores predeterminados para tablas nuevas y mínimo de réplicas sincronizadas. |
-| `observability` | objeto | No | Intención de habilitar el reporter Prometheus. |
+| `observability` | objeto | No | Configuración de las métricas Prometheus. |
 | `configurationOverrides` | mapa de cadenas | No | Propiedades adicionales de `server.yaml` de Fluss. |
 
 Omitir un campo opcional **no** implica que el Operador ya haya elegido un valor apropiado para producción. La validación del esquema cubre tipos y algunos límites numéricos; no sustituye la validación del despliegue.
@@ -46,25 +46,29 @@ Varios Coordinators con el mismo path de ZooKeeper participan en la elección de
 | `coordinator.image`, `tabletServers.image` | cadena | No | Imagen completa por componente; comprobar su compatibilidad con la versión antes de actualizar. |
 | `coordinator.jvm`, `tabletServers.jvm` | objeto | No | `heap` obligatorio si se incluye el objeto y `extraArgs` opcional. |
 | `coordinator.storage` | objeto | No | PVC local opcional. ZooKeeper sigue almacenando los metadatos. |
-| `coordinator.scheduling` | objeto | No | Intención de ubicación; se explica más abajo. |
+| `coordinator.scheduling` | objeto | No | Distribución de los pods; se explica más abajo. |
 | `coordinator.podTemplate` | objeto | No | Etiquetas, anotaciones y contexto de seguridad del pod. |
 | `coordinator.configurationOverrides` | mapa de cadenas | No | Propiedades aplicables solo a los Coordinators. |
 | `tabletServers.replicas` | entero ≥ 1 | Sí | Procesos TabletServer deseados; no es el factor de replicación de cada tabla. |
 | `tabletServers.resources` | objeto | Sí | Reservas de CPU y memoria; límites opcionales. |
 | `tabletServers.storage` | objeto | Sí | PVC local por TabletServer. El almacenamiento remoto se configura aparte. |
-| `tabletServers.scheduling` | objeto | No | Intención de ubicación; se explica más abajo. |
+| `tabletServers.scheduling` | objeto | No | Distribución de los pods; se explica más abajo. |
 | `tabletServers.podTemplate` | objeto | No | Etiquetas, anotaciones y contexto de seguridad del pod. |
 | `tabletServers.configurationOverrides` | mapa de cadenas | No | Propiedades aplicables solo a los TabletServers. |
 
-`resources.requests.cpu`, `resources.requests.memory`, `resources.limits.cpu` y `resources.limits.memory` son cadenas con cantidades de Kubernetes, como `500m` y `2Gi`. Si se incluye `limits`, el tipo Rust actual exige **CPU y memoria**. `jvm.heap` es una cadena como `1Gi`; el futuro controlador deberá comprobar que el límite de memoria deja margen para memoria fuera del heap. `storage.size` es una cadena como `20Gi`; `storage.storageClassName` y `storage.dataDir` son opcionales. `tabletServers.storage.dataDir` indica dónde montar los datos dentro del pod TabletServer.
+Las reservas y límites de CPU y memoria usan cantidades de Kubernetes como `500m` y `2Gi`. Si incluyes `limits`, indica tanto CPU como memoria. Deja margen para memoria fuera del heap: el operador bloquea un `jvm.heap` mayor que la memoria reservada (o el límite, si existe). `storage.size` también usa una cantidad como `20Gi`. `storage.storageClassName` y `storage.dataDir` son opcionales; este último determina la ruta de datos en el pod TabletServer.
 
-La ubicación admite `spreadAcrossNodes` (booleano), `nodeSelector` (mapa de cadenas) y los tipos nativos de Kubernetes `affinity`, `tolerations` y `topologySpreadConstraints`. Todos son opcionales. `podTemplate` contiene **solo** metadatos y `securityContext`: no existe otra afinidad o selector de nodos que pueda contradecir `scheduling`. Las etiquetas del usuario no deben sustituir las etiquetas de propiedad o selección de Services del Operador. El futuro controlador deberá convertir `spreadAcrossNodes` en reglas reales; ponerlo en un CR hoy no distribuye nada. La expansión de StorageClasses, la inmutabilidad, la retención de PVC y la reducción de servidores necesitan un ciclo de vida explícito.
+Puedes configurar `spreadAcrossNodes`, `nodeSelector`, `affinity`, `tolerations` y `topologySpreadConstraints`. Con `spreadAcrossNodes: true`, el operador añade una regla **preferente** de distribución por nodo (`ScheduleAnyway`); no garantiza que cada réplica quede en un nodo distinto. `podTemplate` contiene metadatos y `securityContext`; las etiquetas del operador prevalecen sobre las del usuario.
+
+El operador amplía los PVC existentes si la StorageClass lo permite, bloquea la reducción de tamaño o el cambio de StorageClass y conserva los PVC al reducir réplicas. Antes de reducir TabletServers, comprueba los servidores que saldrían (ver más abajo).
 
 ## Listeners e interrupciones
 
-`listeners.internal` y `listeners.client` utilizan INTERNAL:9123 y CLIENT:9124 si se omiten. `listeners.external` exige `domain`, `gateway.className` y `tls.secretName`; genera bootstrap y nombres por servidor en una sola IP/puerto con Envoy TLS passthrough. `security.saslPlain` referencia el Secret `credentials` y declara `adminUser`; los workloads públicos esperan a que existan los Secrets TLS y SASL. Consultar [acceso nativo externo](native-external-access.md) para configuración, DNS dividido y pruebas. `status.externalEndpoints` indica Services convergidos y `NativeRoutesProgrammed` condiciones Gateway API, no accesibilidad externa demostrada.
+`listeners.internal` y `listeners.client` usan INTERNAL:9123 y CLIENT:9124 por defecto. Para habilitar TLS/SNI público, configura `listeners.external.domain`, `gateway.className`, `tls.secretName` y `security.saslPlain`. El operador espera a que existan los Secrets TLS y SASL antes de arrancar los pods públicos.
 
-`podDisruptionBudget.tabletServers` exige `enabled` y `maxUnavailable` (entero ≥ 0). Su `coordinator` opcional exige `enabled` y `minAvailable` (entero ≥ 1). Para tablets, `maxUnavailable: 0` bloquea las evacuaciones mediante la API de eviction, pero **no** impide borrar directamente un pod. Si se omite `podDisruptionBudget`, el esquema aún no establece ningún valor por defecto. El futuro controlador debería usar `maxUnavailable: 0` por defecto para TabletServers.
+Consulta [acceso nativo externo](native-external-access.md) para configurar DNS y rutas. `status.externalEndpoints` indica que los Services se han creado y `NativeRoutesProgrammed` refleja las condiciones de Gateway API; ninguno demuestra que se pueda conectar desde fuera.
+
+`podDisruptionBudget.tabletServers` exige `enabled` y `maxUnavailable` (entero ≥ 0). Su `coordinator` opcional exige `enabled` y `minAvailable` (entero ≥ 1). Para tablets, `maxUnavailable: 0` bloquea las evacuaciones mediante la API de eviction, pero **no** impide borrar directamente un pod. Si se omite la sección, el operador crea un PDB de TabletServers con `maxUnavailable: 0`; el del Coordinator es opcional. `tabletServers.enabled: false` retira el PDB propio de tablets.
 
 ```yaml
 listeners:
@@ -75,9 +79,11 @@ podDisruptionBudget:
   coordinator: { enabled: true, minAvailable: 1 }
 ```
 
-## Intención de ciclo de vida
+## Reinicios y reducción de réplicas
 
-`rollingUpgrade` recibe tres cadenas de duración obligatorias: `controlledShutdownTimeout` para la salida controlada, `recoveryTimeout` para recuperar el pod y `stabilizationWindow` antes de pasar al siguiente. `controlledShutdownTimeout` determina `terminationGracePeriodSeconds` del pod (30s si falta la sección); Fluss gestiona SIGTERM internamente, así que no hace falta hook preStop — el periodo de gracia es lo que deja terminar el apagado controlado. Tiempos imposibles de parsear fallan en vez de adivinar (el render para el apagado, `Stalled` con evidencia para recuperación/estabilización). Las ventanas de recuperación y estabilización las orquesta el secuenciador de restarts: un pod cada vez, con GREEN fresco antes de cada borrado y estabilización antes del siguiente. `scaleIn.onNonEmptyTabletServer` solo admite **`Block`**: no reducir el StatefulSet si el TabletServer que saldría sigue alojando réplicas. Esta API no tiene `Force` ni rebalanceo automático.
+`rollingUpgrade` configura tres duraciones: `controlledShutdownTimeout`, `recoveryTimeout` y `stabilizationWindow`. La primera fija el periodo de gracia para apagar el pod (30s si se omite); Fluss gestiona SIGTERM sin un hook preStop. Las duraciones inválidas bloquean la operación.
+
+Los reinicios se hacen pod a pod. Antes de cada borrado se exige una observación reciente de salud GREEN; después se espera a que el pod se recupere y se estabilice. `scaleIn.onNonEmptyTabletServer` solo acepta `Block`: no hay `Force` ni rebalanceo automático.
 
 ```yaml
 rollingUpgrade:
@@ -88,7 +94,7 @@ scaleIn:
   onNonEmptyTabletServer: Block
 ```
 
-`Block` es una política declarada, **todavía no una comprobación implementada**. Para hacerla cumplir se necesita la API propuesta de Fluss que consulta el número de réplicas por servidor. Hasta que el Operator pueda demostrar que una reducción o actualización es segura, deberá conservar los recursos en ejecución e indicar el bloqueo en `status`.
+El gate de scale-in consulta la membresía de Fluss y el número actual de réplicas por servidor antes de reducir el StatefulSet. Todos los TabletServers que saldrían deben estar registrados y alojar **cero** réplicas. Si alguno no está vacío o no puede comprobarse, el operador conserva las réplicas existentes e indica el motivo. La lectura por servidor requiere una versión compatible de Fluss: no existe en Fluss 1.0 estándar. El operador no rebalancea tablets automáticamente.
 
 ## Valores predeterminados, observabilidad y opciones avanzadas
 
@@ -98,20 +104,50 @@ Si se incluye `defaults`, `tableBuckets` y `logReplicationFactor` son obligatori
 | --- | --- | --- |
 | `defaults.tableBuckets` | `default.bucket.number` | Buckets de **tabla** (sharding) predeterminados para tablas nuevas — sin relación con ningún bucket S3. |
 | `defaults.logReplicationFactor` | `default.replication.factor` | Replicación predeterminada del **log** en tablas nuevas; no cuenta pods TabletServer. No debe superar `tabletServers.replicas` (verificado por el esquema; el backstop runtime cubre CRDs instaladas antes de la regla). |
-| `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Durabilidad de escritura de log a nivel de servidor con `acks=all` (no es un predeterminado por tabla). Si se omite, el Operador genera el quorum `floor(RF / 2) + 1` a partir del factor de replicación **efectivo** tras fusionar overrides (1 cuando RF es 1); un valor explícito no debe superarlo. Con factores de replicación pares esto prima durabilidad sobre disponibilidad —documentado, no prohibido. Afecta a escrituras que esperan confirmación de todas las réplicas; coordinar con los ajustes de confirmación del cliente. |
+| `defaults.minInSyncReplicas` | `log.replica.min-in-sync-replicas-number` | Mínimo de réplicas sincronizadas para confirmar escrituras del log; ver más abajo. |
 
-`observability.prometheus` es booleano con predeterminado `true`: el Operador genera `metrics.reporters: prometheus` en la config base e inyecta las anotaciones `prometheus.io/scrape` más `port` en los pod templates de Coordinator y TabletServers, derivando el puerto de las propiedades efectivas fusionadas (un override del usuario a la clave del puerto se respeta; cambiar la clave de reporters fuera de prometheus retira las anotaciones). Un `false` explícito desactiva todo. No se crea Service ni ServiceMonitor de métricas —eso pertenece al empaquetado. `configurationOverrides` puede establecerse globalmente y por componente, con nombres de propiedades Fluss y valores de tipo **cadena**, por ejemplo `kv.snapshot.interval: "10min"`. Los valores específicos del componente prevalecen sobre los globales. No pongas credenciales en ninguno de ellos. El reconciler **aplica** la propiedad de claves: las de identidad, topología, credenciales, cableado de almacenamiento y defaults renderizados (listeners, identidad de TabletServer, ruta ZooKeeper, propiedades S3, `data.dir`, defaults de tabla) se rechazan con estado `ConfigBlocked` que nombra la clave; las de afinado (`kv.*`, `netty.*`, …) y las futuras desconocidas pasan. Las claves dinámicas (la allowlist viva de Fluss 1.0: `kv.snapshot.interval`, `datalake.*` y pares, espejada en código) compartidas con valores idénticos por coordinator y tablets se aplican vía Admin sin reinicios; valores divergentes por rol y todo lo demás pasan por restarts secuenciados (los StatefulSets van en OnDelete; el operador borra pods uno a uno con gates de salud, jamás rolling nativo de Kubernetes). Los valores dinámicos aplicados se registran como hashes en `status.appliedDynamicConfig`; un rechazo del servidor aparece como `OperationBlocked` nombrando la clave y escala a restart-bound (reintentado tras un restart secuenciado; claves persistentemente rechazadas siguen reportando en vez de repetirse).
+Si omites `minInSyncReplicas`, el operador calcula `floor(RF / 2) + 1`
+con el factor de replicación efectivo (1 cuando RF=1). Un valor explícito
+no puede superar RF. Con RF par, el valor predeterminado prima la durabilidad
+sobre la disponibilidad de escritura; coordínalo con la configuración de
+confirmaciones del cliente.
 
-`gateway` es opt-in (`enabled: false` por defecto): activado, el Operador despliega un Deployment del Gateway con imagen stock (env de bootstrap al coordinator del clúster) más un Service ClusterIP más probes, y un objeto Ingress si se fija `gateway.ingress`. El tag de imagen es por defecto el mate de la release (`apache/fluss-gateway:<spec.version>`) y se puede cambiar — sin matriz de versiones cableada. El Ingress lleva el `host` declarado, `className` opcional (literal) y `tlsSecretName` opcional, que debe existir ya en el namespace o el paso rehúsa con evidencia `GatewayBlocked`; TLS, DNS y auth viven en el entorno, jamás en el operador. Desactivar recoge los tres objetos; `status.gateway` informa deseadas/listas más la URL interna, o queda ausente.
+### Métricas
+
+Prometheus está activo por defecto: el operador genera `metrics.reporters: prometheus` y añade anotaciones de scrape a los pods de Coordinator y TabletServers. `observability.prometheus: false` lo desactiva. No se crea un Service ni un ServiceMonitor de métricas.
+
+### Configuración adicional
+
+Declara propiedades de Fluss como **cadenas** en `configurationOverrides`, para todo el clúster o por componente. Por ejemplo, `kv.snapshot.interval: "10min"`. Los valores de cada componente prevalecen sobre los globales. No pongas credenciales aquí: usa referencias a Secrets.
+
+El operador rechaza cambios en las claves que gestiona, como listeners, identidad de TabletServer, ruta de ZooKeeper, opciones S3, `data.dir` y valores predeterminados de tablas. El bloqueo identifica la clave en `status`. Las demás claves pasan a Fluss.
+
+### Aplicación de cambios
+
+Fluss 1.0 permite aplicar algunas claves dinámicas, como `kv.snapshot.interval`, mediante Admin sin reiniciar, siempre que Coordinator y TabletServers pidan el mismo valor. `status.appliedDynamicConfig` registra **hashes** de los valores aplicados, nunca los valores originales.
+
+Los demás cambios requieren reinicios secuenciados: los StatefulSets usan `OnDelete` y el operador borra los pods uno a uno tras comprobar la salud. Si el servidor rechaza una clave dinámica, aparece `OperationBlocked` y se intenta un reinicio; los rechazos persistentes siguen visibles sin provocar un bucle de reinicios.
+
+### Gateway HTTP opcional
+
+`gateway.enabled: true` crea un Deployment y un Service ClusterIP. La imagen
+predeterminada es `apache/fluss-gateway:<spec.version>` y puede cambiarse.
+`status.gateway` muestra las réplicas listas y la URL interna mientras está
+activo.
+
+`gateway.ingress` crea además un Ingress con el host y la clase indicados.
+El Secret TLS debe existir previamente; si falta, `GatewayBlocked` explica
+el bloqueo. La plataforma se encarga de DNS, certificados y autenticación.
+Al desactivar el Gateway se retiran solo sus recursos propios.
 
 El Gateway HTTP es incompatible con `security.saslPlain`: no propaga el
 principal nativo del llamante y el CRD impide habilitarlos conjuntamente.
 El Gateway API con routing SNI nativo es un recurso distinto.
 
-Las puertas exteriores por tenant usan el mismo objeto sin código nuevo: `host` admite literales wildcard (p. ej. `*.example.com`, lo casa el controlador), y la automatización TLS se parte por capas — el lado entrega (un `Certificate` de cert-manager, pipeline o manual) crea el secreto, el operador solo lo referencia y verifica (`GatewayBlocked` si falta). Verificado con Traefik: host wildcard más certificado real sirve HTTPS de punta a punta, writes incluidos. Ningún nombre de tenant, vendor o SaaS pertenece al operador: los hosts son dato de usuario.
+El Ingress admite hosts comodín como `*.example.com` si el controlador Ingress los acepta. El operador solo referencia el Secret TLS; la plataforma debe crearlo.
 
 ## Cambios en un clúster existente
 
-El esquema permite modificar estos campos, pero eso **no** significa que las operaciones sean seguras. Cambiar la versión, reducir TabletServers o PVC, o mover los datos de ZooKeeper/S3 no debe convertirse en un parche directo al StatefulSet. Hasta implementar el ciclo de vida correspondiente, esas peticiones deberán rechazarse o bloquearse con una condición clara. Ni los volúmenes existentes ni los objetos remotos deben eliminarse automáticamente.
+Que la CRD acepte un cambio no significa que sea seguro. Los cambios de imagen usan reinicios secuenciados; el scale-in exige la comprobación reciente descrita arriba. Se bloquean las reducciones de PVC y los cambios de StorageClass; la ampliación depende de la StorageClass. No cambies la ruta de ZooKeeper, el bucket ni el prefijo S3 sin migrar los datos. El operador no borra por ti los PVC ni los objetos remotos.
 
 Consulta [almacenamiento remoto y credenciales](remote-storage.md) para los campos S3 y [estado y condiciones](status.md) para la información observada.

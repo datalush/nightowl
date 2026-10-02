@@ -1,6 +1,6 @@
 # What works today
 
-The `FlussCluster` schema is defined in `operator/src/api.rs` and the controller converges it into running Fluss clusters. Capabilities below are verified live in k3d unless marked otherwise.
+The `FlussCluster` API is defined in `src/api.rs`. The operator has been exercised in k3d; backend-specific verification is noted below.
 
 | Capability | Current state |
 | --- | --- |
@@ -11,12 +11,13 @@ The `FlussCluster` schema is defined in `operator/src/api.rs` and the controller
 | Least-privilege RBAC | Implemented; verified under its own ServiceAccount with zero `Forbidden`. |
 | Populate `.status` | Implemented: resources, storage, reachability and cluster health with evidence. |
 | JVM heap, PVCs, PDBs, scheduling, client Service | Implemented; oversized heaps blocked before pods converge. |
-| Safe restart, upgrade, scale-in, recovery | Partial: restarts and recovery verified; controlled upgrade/scale-in pending. |
-| Cross-server restore, client tokens, real AWS | Not verified yet; tracked separately. |
+| Restarts and scale-in | Sequenced restarts implemented; scale-in requires a fresh per-server read proving outgoing servers are registered and empty. Stock Fluss 1.0 lacks that read. No automatic rebalance. |
+| Recovery and client tokens | Disk replacement and follower promotion exercised with RustFS; Fluss-issued S3 client tokens exercised with RustFS IAM user credentials. Recovery is performed by Fluss, not the operator. |
+| AWS EKS | Manifest provided; IAM, client-token and recovery flows not tested on AWS. |
 
 ## Using the examples
 
-The example manifests deploy real clusters; each carries its verification status. The [EKS](examples/aws-eks.md) and [RustFS](examples/rustfs.md) pages explain their different credential and delegation assumptions. In particular, the presence of an S3 URI does not prove that Fluss can obtain delegation tokens or recover a KV tablet on another server.
+The [EKS](examples/aws-eks.md) and [RustFS](examples/rustfs.md) examples have different credential requirements. Neither an S3 URI nor `RemoteStorageReady=True` proves that Fluss can issue client tokens or recover data. The RustFS example contains a placeholder endpoint: replace it before use.
 
 ## Local documentation workflow
 

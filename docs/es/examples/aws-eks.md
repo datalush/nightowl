@@ -18,6 +18,14 @@ Fluss 1.0 usa la cadena de credenciales AWS predeterminada con IRSA. EKS Pod Ide
 
 ## Significado operativo
 
-`spreadAcrossNodes` genera un reparto suave por hostname; node selectors, afinidad y tolerations pasan a los pods. `jvm.heap` debe dejar memoria suficiente por debajo del límite del contenedor para usos fuera del heap (el operador bloquea heaps mayores que la memoria). Los listeners determinan tanto los Services como la configuración de Fluss. El PDB solicita `maxUnavailable: 0` para tablets; `scaleIn: Block` exige además una comprobación de Fluss, y los tiempos de `rollingUpgrade` **no** activan actualizaciones por sí solos.
+`spreadAcrossNodes` añade una regla preferente de distribución por nodo;
+selectores, afinidad y tolerancias pasan a los pods. Deja margen para memoria
+fuera del heap por debajo de la reserva o el límite: el operador bloquea
+heaps mayores.
+
+El ejemplo solicita `maxUnavailable: 0` para tablets. El scale-in también
+exige que Fluss confirme que los servidores salientes están vacíos; Fluss
+1.0 estándar no ofrece esa lectura. Las duraciones de `rollingUpgrade` no
+provocan por sí solas un cambio de versión.
 
 El factor de replicación predeterminado se aplica a **tablas nuevas**. Tener dos Coordinators no garantiza por sí solo la disponibilidad de ZooKeeper ni del bucket S3. El almacenamiento, las actualizaciones y la reducción segura requieren el ciclo de vida explicado en la [referencia de la API](../api/fluss-cluster.md#cambios-en-un-cluster-existente).

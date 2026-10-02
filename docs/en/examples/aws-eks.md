@@ -18,6 +18,13 @@ Fluss 1.0 uses the AWS default credential chain for IRSA; EKS Pod Identity also 
 
 ## Operational meaning
 
-`spreadAcrossNodes` renders a soft hostname spread; node selectors, affinity and tolerations pass through to the pods. `jvm.heap` must leave room under the container's memory limit for off-heap use (the operator blocks heaps larger than container memory). Listener names/ports drive both the Services and the Fluss configuration. The PDB requests `maxUnavailable: 0` for TabletServers; `scaleIn: Block` requires a separate Fluss-aware check, and `rollingUpgrade` timeouts do **not** enable upgrades on their own.
+`spreadAcrossNodes` adds a soft hostname spread; selectors, affinity and
+tolerations pass through to the pods. Leave room for off-heap memory below
+the memory request or limit: the operator blocks larger JVM heaps.
+
+The example requests `maxUnavailable: 0` for TabletServers. Scale-in still
+requires Fluss to report that outgoing servers are empty; stock Fluss 1.0
+does not provide that read. `rollingUpgrade` timeouts do not by themselves
+trigger a version change.
 
 The default log replication factor applies to **new tables**. Running two Coordinators does not make the external ZooKeeper ensemble or S3 bucket highly available by itself. Storage, upgrades, and safe scale-in require the lifecycle work described in [the API reference](../api/fluss-cluster.md#changes-to-a-running-cluster).

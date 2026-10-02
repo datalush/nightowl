@@ -121,11 +121,9 @@ reachable, or use existing private CLIENT settings.
 
 ## Verification
 
-Test both Java and Rust clients with TLS and SASL via a single
-`fluss.example.com:443` bootstrap: write and read data on multiple tablets,
-grant Alice READ, deny Bob, restart a tablet preserving its PVC, change
-coordinator leadership and scale out. Include Spark/Flink workers, not only
-the driver. Remote snapshots and log reads may also need direct access to
-object storage; RPC TLS does not proxy S3. See [lab evidence](lab.md) for what
-has actually been exercised. The operator's earlier per-port TCPRoute design
-was an experimental phase and is not the current configuration.
+Use a TLS/SASL client with the single `fluss.example.com:443` bootstrap.
+Verify writes and reads across tablets, ACL permissions, a tablet restart
+with its PVC retained and coordinator failover. Test workers as well as
+drivers if you use Spark or Flink. Remote data reads may require separate
+access to S3: TLS for the Fluss protocol does not proxy object storage.
+See [what works today](../current-state.md) for the tested scope.
